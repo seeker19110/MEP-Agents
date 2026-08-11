@@ -5,52 +5,31 @@ import sys
 
 API_URL = "http://localhost:8083/api/v1/autocad/analyze"
 
-def get_acad_elements():
+def get_acad_document_path():
     try:
         acad = win32com.client.Dispatch("AutoCAD.Application")
         doc = acad.ActiveDocument
-        model_space = doc.ModelSpace
         
-        elements_data = []
-        
-        # Quét các đối tượng trong ModelSpace
-        # Để không bị chậm, chỉ lấy 1000 đối tượng đầu tiên làm demo
-        count = 0
-        for entity in model_space:
-            if count > 1000:
-                break
-                
-            el_dict = {
-                "id": entity.ObjectID,
-                "layer": entity.Layer,
-                "type": entity.ObjectName
-            }
+        file_path = doc.FullName
+        if not file_path:
+            return None, "Bản vẽ chưa được lưu. Hãy lưu file (.dwg) trước khi chạy lệnh."
             
-            # Nếu là đường thẳng/Pline, lấy độ dài
-            if entity.ObjectName in ["AcDbLine", "AcDbPolyline"]:
-                try:
-                    el_dict["length"] = entity.Length
-                except:
-                    pass
-                    
-            elements_data.append(el_dict)
-            count += 1
-            
-        return {"project_name": doc.Name, "elements": elements_data}
+        return {"project_name": doc.Name, "file_path": file_path}, None
         
     except Exception as e:
-        print("Lỗi khi kết nối AutoCAD:", str(e))
-        return None
+        return None, f"Lỗi khi kết nối AutoCAD: {str(e)}"
 
 def main():
-    print("Đang quét mô hình AutoCAD hiện tại...")
-    payload_dict = get_acad_elements()
+    print("Đang kết nối với AutoCAD...")
+    payload_dict, err = get_acad_document_path()
     
-    if not payload_dict:
-        print("Không thể lấy dữ liệu từ AutoCAD. Hãy chắc chắn AutoCAD đang mở.")
+    if err:
+        print(err)
+        input("\nNhấn Enter để thoát...")
         return
         
-    print(f"Đã trích xuất {len(payload_dict['elements'])} cấu kiện. Đang gửi lên API...")
+    print(f"Đã xác nhận bản vẽ hiện tại: {payload_dict['file_path']}")
+    print("Đang gửi lệnh xử lý siêu tốc lên MEP-Agents FastAPI...")
     
     payload = json.dumps(payload_dict).encode('utf-8')
     

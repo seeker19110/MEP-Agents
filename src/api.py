@@ -1,5 +1,5 @@
 import os
-import shutil
+import aiofiles
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -33,6 +33,11 @@ class RevitPayload(BaseModel):
     project_name: str
     elements: list[dict]
 
+class AutoCADPayload(BaseModel):
+    project_name: str
+    file_path: str
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "message": "Welcome to MEP-Agents Cloud API v3.0"}
@@ -45,8 +50,9 @@ async def upload_and_takeoff(file: UploadFile = File(...)):
     """
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    async with aiofiles.open(file_path, "wb") as buffer:
+        content = await file.read()
+        await buffer.write(content)
         
     # Gửi sang Celery Queue (Distributed Processing)
     task = parse_cad_to_db_task.delay(file_path, user_id="web_client")
@@ -82,7 +88,7 @@ def download_boq(task_id: str):
     return {"error": "File not found"}
 
 @app.post("/api/v1/revit/analyze")
-def analyze_revit_model(payload: RevitPayload):
+async def analyze_revit_model(payload: RevitPayload):
     """
     Nhận gói dữ liệu 3D JSON từ pyRevit Plugin, phân tích bởi Agentic Swarm.
     """
@@ -99,16 +105,18 @@ def analyze_revit_model(payload: RevitPayload):
     return {"status": "success", "message": message}
 
 @app.post("/api/v1/autocad/analyze")
-def analyze_autocad_model(payload: RevitPayload):
+async def analyze_autocad_model(payload: AutoCADPayload):
     """
-    Nhận gói dữ liệu JSON từ AutoCAD (via COM), phân tích bởi Agentic Swarm.
+    Nhận đường dẫn file từ AutoCAD (via COM), đẩy vào hàng đợi phân tích bởi Agentic Swarm / Celery.
     """
-    total_elements = len(payload.elements)
-    lines = sum(1 for el in payload.elements if el.get("type") in ["AcDbLine", "AcDbPolyline"])
+    if not os.path.exists(payload.file_path):
+        return {"status": "error", "message": f"Không tìm thấy file: {payload.file_path}"}
+        
+    task = parse_cad_to_db_task.delay(payload.file_path, user_id="cad_client")
     
     message = f"Dự án CAD: {payload.project_name}\n"
-    message += f"Đã quét thành công {total_elements} đối tượng.\n"
-    message += f" - Số lượng đường Line/PLine: {lines}\n"
-    message += "\nSwarm AI đang xử lý khối lượng trực tiếp từ bản vẽ đang mở!"
+    message += f"Đã nhận lệnh từ AutoCAD. File: {payload.file_path}\n"
+    message += f"Swarm AI đang xử lý khối lượng dưới nền. Task ID: {task.id}\n"
+    message += "Vui lòng xem kết quả chi tiết trên Web!"
     
-    return {"status": "success", "message": message}
+    return {"status": "success", "message": message, "task_id": task.id}
