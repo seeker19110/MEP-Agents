@@ -18,13 +18,51 @@ def test_normalize_strips_diacritics_and_punctuation():
 
 
 def test_match_layer_recognizes_common_vietnamese_variants():
-    assert cad_standards.match_layer("Ong_Gio_Cap") == "M-DUCT-SUPPLY"
+    assert cad_standards.match_layer("Ong_Gio_Cap") == "M-SAD"
     assert cad_standards.match_layer("O_CAM_DIEN") == "E-POWER"
     assert cad_standards.match_layer("khong-co-nghia-gi-ca") is None
 
 
 def test_match_layer_recognizes_already_standard_name_regardless_of_case():
-    assert cad_standards.match_layer("m-duct-supply") == "M-DUCT-SUPPLY"
+    assert cad_standards.match_layer("m-duct-supply") == "M-SAD"
+
+
+@pytest.mark.parametrize("raw_name, expected_canonical", [
+    ("SAD", "M-SAD"),
+    ("RAD", "M-RAD"),
+    ("FAD", "M-FAD"),
+    ("EAD", "M-EAD"),
+    ("KEAD", "M-KEAD"),
+    ("PAD", "M-PAD"),
+    ("SEAD", "M-SEAD"),
+    ("M-KEAD", "M-KEAD"),
+])
+def test_match_layer_recognizes_duct_abbreviations(raw_name, expected_canonical):
+    assert cad_standards.match_layer(raw_name) == expected_canonical
+
+
+def test_match_layer_disambiguates_exhaust_from_kitchen_exhaust():
+    """Bug cũ: so khớp 2 chiều khiến 'EAD' (Exhaust) vô tình khớp nhầm 'KEAD' (Kitchen
+    Exhaust) vì 'EAD' là chuỗi con của 'KEAD'. Layer/Block khác hệ thống (EAD dùng ống
+    tôn thường, KEAD bắt buộc vật liệu chống cháy riêng cho bếp) không được gộp nhầm."""
+    assert cad_standards.match_layer("EAD") == "M-EAD"
+    assert cad_standards.match_layer("KEAD") == "M-KEAD"
+    assert cad_standards.match_layer("ong_gio_thai_bep") == "M-KEAD"
+    assert cad_standards.match_layer("ong_gio_thai") == "M-EAD"
+
+
+@pytest.mark.parametrize("raw_name, expected_canonical", [
+    ("ong_dong", "M-PIPE-REF"),
+    ("ong_nuoc_ngung", "M-PIPE-COND"),
+    ("CHWS", "M-PIPE-CHWS"),
+    ("CHWR", "M-PIPE-CHWR"),
+    ("ong_cap_nuoc_nong_sinh_hoat", "P-PIPE-HW"),
+    ("ong_hoi_nuoc_nong", "P-PIPE-HWR"),
+    ("ong_hong_nuoc", "F-PIPE-HYD"),
+    ("den_su_co", "E-LIGHT-EMG"),
+])
+def test_match_layer_recognizes_pipe_and_other_mepf_variants(raw_name, expected_canonical):
+    assert cad_standards.match_layer(raw_name) == expected_canonical
 
 
 def test_match_block_recognizes_common_variants():
@@ -35,7 +73,7 @@ def test_match_block_recognizes_common_variants():
 
 def _make_messy_dxf(path: str):
     doc = ezdxf.new("R2010")
-    doc.layers.add(name="Ong_Gio_Cap")  # sẽ khớp M-DUCT-SUPPLY
+    doc.layers.add(name="Ong_Gio_Cap")  # sẽ khớp M-SAD
     doc.layers.add(name="THIET_BI_LA")  # không nhận diện được, cần review
     doc.blocks.new(name="O_CAM_DIEN_CU").add_circle((0, 0), radius=50)  # khớp SOCKET
     msp = doc.modelspace()
@@ -51,17 +89,17 @@ def test_standardize_renames_recognized_layer_and_fixes_color(workspace):
     result = standardize_cad_drawing.invoke({"file_path": dxf_path})
 
     assert "THÀNH CÔNG" in result
-    assert "Ong_Gio_Cap -> M-DUCT-SUPPLY" in result
+    assert "Ong_Gio_Cap -> M-SAD" in result
 
     doc = ezdxf.readfile(resolve_safe_path(dxf_path))
     assert "Ong_Gio_Cap" not in doc.layers
-    layer = doc.layers.get("M-DUCT-SUPPLY")
-    assert layer.dxf.color == cad_standards.LAYER_STANDARD["M-DUCT-SUPPLY"]["color"]
-    assert layer.description == cad_standards.LAYER_STANDARD["M-DUCT-SUPPLY"]["description"]
+    layer = doc.layers.get("M-SAD")
+    assert layer.dxf.color == cad_standards.LAYER_STANDARD["M-SAD"]["color"]
+    assert layer.description == cad_standards.LAYER_STANDARD["M-SAD"]["description"]
     # Hình học không bị đụng tới: vẫn còn đúng 1 LINE, chỉ đổi layer.
     lines = list(doc.modelspace().query("LINE"))
     assert len(lines) == 1
-    assert lines[0].dxf.layer == "M-DUCT-SUPPLY"
+    assert lines[0].dxf.layer == "M-SAD"
 
 
 def test_standardize_lists_unmatched_layer_for_manual_review(workspace):

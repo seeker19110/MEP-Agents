@@ -10,58 +10,121 @@ Mỗi Layer chuẩn có "keywords": các chuỗi (đã chuẩn hóa qua `normali
 trong bản vẽ người dùng đẩy vào, dùng để tự nhận diện & đổi tên. Chỉ những layer/
 block khớp keyword cụ thể mới được TỰ ĐỘNG đổi tên; layer/block không khớp được
 liệt kê để người dùng tự kiểm tra thay vì đoán bừa.
+
+Quy ước màu tổng quát để nhìn Layer là đoán ngay được vai trò (áp dụng xuyên suốt
+cả 4 hệ, không chỉ riêng 1 hệ):
+- "Cấp" (nguồn/gió/nước lạnh đi vào không gian) -> Xanh dương (5)
+- "Hồi" (đi ngược về nguồn) -> Cyan (4)
+- Nóng (nước nóng, sưởi) -> Đỏ (1) — quy ước "nóng = đỏ, lạnh = xanh" kinh điển
+- Liên quan an toàn cháy nổ/thoát hiểm (PCCC, tăng áp, hút khói, đèn sự cố)
+  -> luôn thuộc dải màu đỏ/cam để nổi bật, kể cả khi Layer đó do hệ M hay E vẽ
 """
 import unicodedata
 
-
-def normalize(name: str) -> str:
-    """Chuẩn hóa chuỗi để so khớp: bỏ dấu tiếng Việt, viết hoa, chỉ giữ chữ/số."""
-    if not name:
-        return ""
-    decomposed = unicodedata.normalize("NFD", name)
-    stripped = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
-    return "".join(ch for ch in stripped.upper() if ch.isalnum())
-
-
 LAYER_STANDARD = {
-    "M-DUCT-SUPPLY": {"color": 5, "discipline": "Mechanical", "description": "Ống gió cấp (Supply Air Duct)",
-                       "keywords": ["ONGGIOCAP", "DUCTSUPPLY", "GIOCAPSA", "SUPPLYAIR", "GIOCAP"]},
-    "M-DUCT-RETURN": {"color": 4, "discipline": "Mechanical", "description": "Ống gió hồi (Return Air Duct)",
-                       "keywords": ["ONGGIOHOI", "DUCTRETURN", "GIOHOIRA", "RETURNAIR", "GIOHOI"]},
-    "M-PIPE-CHW": {"color": 140, "discipline": "Mechanical", "description": "Ống nước lạnh điều hòa (Chilled Water)",
-                   "keywords": ["ONGNUOCLANH", "CHILLEDWATER", "ONGCHW", "PIPECHW"]},
-    "M-EQUIP": {"color": 6, "discipline": "Mechanical", "description": "Thiết bị Cơ (FCU/AHU/Chiller)",
+    # ---------------------------------------------------------------- MECHANICAL (HVAC)
+    # Ống gió (Duct) — dùng đúng ký hiệu viết tắt quốc tế phổ biến trong hồ sơ MEPF.
+    "M-SAD": {"color": 5, "discipline": "Mechanical", "description": "Ống gió cấp (Supply Air Duct)",
+              "keywords": ["SAD", "ONGGIOCAP", "DUCTSUPPLY", "GIOCAPSA", "SUPPLYAIRDUCT", "GIOCAP"]},
+    "M-RAD": {"color": 4, "discipline": "Mechanical", "description": "Ống gió hồi (Return Air Duct)",
+              "keywords": ["RAD", "ONGGIOHOI", "DUCTRETURN", "GIOHOIRA", "RETURNAIRDUCT", "GIOHOI"]},
+    "M-FAD": {"color": 3, "discipline": "Mechanical", "description": "Ống gió tươi (Fresh Air Duct)",
+              "keywords": ["FAD", "ONGGIOTUOI", "FRESHAIRDUCT", "GIOTUOI", "OUTDOORAIRDUCT"]},
+    "M-EAD": {"color": 6, "discipline": "Mechanical", "description": "Ống gió thải (Exhaust Air Duct)",
+              "keywords": ["EAD", "ONGGIOTHAI", "EXHAUSTAIRDUCT", "GIOTHAI"]},
+    "M-KEAD": {"color": 30, "discipline": "Mechanical", "description": "Ống gió thải bếp (Kitchen Exhaust Air Duct)",
+               "keywords": ["KEAD", "ONGGIOTHAIBEP", "KITCHENEXHAUST", "GIOTHAIBEP", "HUTMUIBEP"]},
+    "M-PAD": {"color": 1, "discipline": "Mechanical",
+              "description": "Ống gió tăng áp cầu thang/PCCC (Pressurization Air Duct)",
+              "keywords": ["PAD", "ONGGIOTANGAP", "PRESSURIZATIONDUCT", "TANGAPCAUTHANG", "TANGAP"]},
+    "M-SEAD": {"color": 12, "discipline": "Mechanical", "description": "Ống gió hút khói (Smoke Exhaust Air Duct)",
+               "keywords": ["SEAD", "ONGGIOHUTKHOI", "SMOKEEXHAUSTDUCT", "HUTKHOI", "SMOKEEXTRACT"]},
+    # Ống nước/gas (Pipe)
+    "M-PIPE-REF": {"color": 140, "discipline": "Mechanical", "description": "Ống đồng gas lạnh (Refrigerant Pipe)",
+                   "keywords": ["ONGDONG", "ONGGASLANH", "REFRIGERANTPIPE", "ONGGAS", "COPPERPIPE"]},
+    "M-PIPE-COND": {"color": 8, "discipline": "Mechanical",
+                     "description": "Ống nước ngưng (Condensate Drain Pipe)",
+                     "keywords": ["ONGNUOCNGUNG", "CONDENSATEPIPE", "NUOCNGUNG", "DRAINPIPECOND"]},
+    "M-PIPE-CHWS": {"color": 5, "discipline": "Mechanical",
+                     "description": "Ống cấp nước lạnh Chiller (Chilled Water Supply)",
+                     "keywords": ["CHWS", "ONGCAPNUOCLANH", "CHILLEDWATERSUPPLY", "ONGCAPCHILLER"]},
+    "M-PIPE-CHWR": {"color": 4, "discipline": "Mechanical",
+                     "description": "Ống hồi nước lạnh Chiller (Chilled Water Return)",
+                     "keywords": ["CHWR", "ONGHOINUOCLANH", "CHILLEDWATERRETURN", "ONGHOICHILLER"]},
+    "M-EQUIP": {"color": 9, "discipline": "Mechanical", "description": "Thiết bị Cơ (FCU/AHU/Chiller)",
                 "keywords": ["THIETBICO", "THIETBIDIEUHOA", "AHU", "CHILLER", "MECHEQUIP"]},
 
-    "E-LIGHT": {"color": 2, "discipline": "Electrical", "description": "Đèn chiếu sáng",
+    # ---------------------------------------------------------------- ELECTRICAL
+    "E-LIGHT": {"color": 2, "discipline": "Electrical", "description": "Đèn chiếu sáng thường",
                 "keywords": ["DENCHIEUSANG", "LIGHTING", "DENOP", "DENTRAN", "LIGHTFIXTURE"]},
+    "E-LIGHT-EMG": {"color": 11, "discipline": "Electrical",
+                     "description": "Đèn sự cố / Đèn Exit (Emergency & Exit Light)",
+                     "keywords": ["DENSUCO", "DENEXIT", "EMERGENCYLIGHT", "EXITLIGHT", "DENTHOATHIEM"]},
     "E-LIGHT-SWITCH": {"color": 32, "discipline": "Electrical", "description": "Công tắc đèn",
                         "keywords": ["CONGTACDEN", "LIGHTSWITCH", "CONGTAC"]},
     "E-POWER": {"color": 1, "discipline": "Electrical", "description": "Ổ cắm & đường dây động lực",
                 "keywords": ["OCAMDIEN", "OUTLETPOWER", "DONGLUC", "SOCKETPOWER", "OCAM"]},
     "E-CABLE-TRAY": {"color": 30, "discipline": "Electrical", "description": "Máng cáp / Thang cáp",
                       "keywords": ["MANGCAP", "THANGCAP", "CABLETRAY"]},
+    "E-TRUNKING": {"color": 33, "discipline": "Electrical", "description": "Máng nhựa đi dây (Trunking)",
+                    "keywords": ["MANGNHUA", "TRUNKING", "MANGDIEN"]},
     "E-PANEL": {"color": 6, "discipline": "Electrical", "description": "Tủ điện / Bảng điện",
                 "keywords": ["TUDIEN", "BANGDIEN", "PANELBOARD", "DISTRIBUTIONPANEL"]},
-    "E-LIGHTNING": {"color": 12, "discipline": "Electrical", "description": "Hệ thống chống sét",
+    "E-GENERATOR": {"color": 14, "discipline": "Electrical",
+                     "description": "Máy phát điện dự phòng & Tủ chuyển nguồn ATS",
+                     "keywords": ["MAYPHATDIEN", "GENERATOR", "ATS", "TUCHUYENNGUON"]},
+    "E-LIGHTNING": {"color": 12, "discipline": "Electrical", "description": "Chống sét & Tiếp địa",
                      "keywords": ["CHONGSET", "LIGHTNINGPROTECTION", "TIEPDIA", "GROUNDING"]},
+    "E-ELV-DATA": {"color": 140, "discipline": "Electrical", "description": "Mạng Data / Điện thoại (ELV)",
+                    "keywords": ["MANGDATA", "MANGLAN", "DIENTHOAI", "TELEPHONEDATA", "STRUCTUREDCABLING"]},
+    "E-ELV-CCTV": {"color": 141, "discipline": "Electrical", "description": "Camera an ninh (CCTV)",
+                    "keywords": ["CAMERA", "CCTV", "ANNINH"]},
+    "E-ELV-ACCESS": {"color": 142, "discipline": "Electrical", "description": "Kiểm soát vào ra (Access Control)",
+                      "keywords": ["KIEMSOATVAORA", "ACCESSCONTROL", "THEDIEUTU"]},
 
-    "P-PIPE-CAP": {"color": 3, "discipline": "Plumbing", "description": "Ống cấp nước (Water Supply)",
-                   "keywords": ["ONGCAPNUOC", "CAPNUOC", "WATERSUPPLY", "PIPECAP"]},
-    "P-PIPE-THOAT": {"color": 43, "discipline": "Plumbing", "description": "Ống thoát nước (Drainage)",
-                      "keywords": ["ONGTHOATNUOC", "THOATNUOC", "DRAINAGE", "PIPETHOAT", "THOATSAN"]},
+    # ---------------------------------------------------------------- PLUMBING (Cấp thoát nước)
+    "P-PIPE-CAP": {"color": 5, "discipline": "Plumbing", "description": "Ống cấp nước sinh hoạt (Cold Water Supply)",
+                   "keywords": ["ONGCAPNUOCSINHHOAT", "ONGCAPNUOC", "CAPNUOC", "COLDWATERSUPPLY", "PIPECAP"]},
+    "P-PIPE-HW": {"color": 1, "discipline": "Plumbing",
+                  "description": "Ống cấp nước nóng sinh hoạt (Domestic Hot Water Supply)",
+                  "keywords": ["ONGCAPNUOCNONGSINHHOAT", "ONGNUOCNONG", "HOTWATERSUPPLY", "NUOCNONG"]},
+    "P-PIPE-HWR": {"color": 12, "discipline": "Plumbing",
+                   "description": "Ống hồi nước nóng (Hot Water Return / Recirculation)",
+                   "keywords": ["ONGHOINUOCNONG", "HOTWATERRETURN", "HOINUOCNONG", "RECIRCULATION"]},
+    "P-PIPE-THOAT": {"color": 43, "discipline": "Plumbing",
+                      "description": "Ống thoát nước thải (Soil / Waste Drainage)",
+                      "keywords": ["ONGTHOATNUOC", "THOATNUOC", "DRAINAGE", "PIPETHOAT", "THOATSAN", "THOATTHAI"]},
+    "P-PIPE-VENT": {"color": 8, "discipline": "Plumbing", "description": "Ống thông hơi (Vent Pipe)",
+                     "keywords": ["ONGTHONGHOI", "VENTPIPE", "THONGHOI"]},
+    "P-PIPE-RAIN": {"color": 140, "discipline": "Plumbing",
+                     "description": "Ống thoát nước mưa (Rainwater / Storm Drainage)",
+                     "keywords": ["ONGTHOATNUOCMUA", "RAINWATER", "STORMDRAIN", "NUOCMUA"]},
     "P-EQUIP": {"color": 84, "discipline": "Plumbing", "description": "Thiết bị Cấp thoát nước (Bơm/Bể)",
                 "keywords": ["THIETBICAPTHOAT", "BENUOC", "MAYBOMNUOC", "PLUMBEQUIP"]},
 
+    # ---------------------------------------------------------------- FIREFIGHTING (PCCC)
     "F-SPRINKLER": {"color": 1, "discipline": "Firefighting", "description": "Đầu phun Sprinkler",
                      "keywords": ["DAUPHUNSPRINKLER", "SPRINKLERHEAD", "DAUPHUNCHUACHAY"]},
-    "F-PIPE": {"color": 12, "discipline": "Firefighting", "description": "Ống chữa cháy",
-               "keywords": ["ONGCHUACHAY", "ONGPCCC", "FIREPIPE", "ONGSPRINKLER"]},
-    "F-EQUIP": {"color": 10, "discipline": "Firefighting", "description": "Thiết bị PCCC (Bơm chữa cháy/Bình chữa cháy)",
-                "keywords": ["THIETBIPCCC", "BOMCHUACHAY", "BINHCHUACHAY", "FIREPUMP", "FIREEQUIP"]},
+    "F-PIPE-SPK": {"color": 12, "discipline": "Firefighting", "description": "Ống cấp nước hệ Sprinkler",
+                    "keywords": ["ONGSPRINKLER", "SPRINKLERPIPE", "ONGCHUACHAYSPRINKLER"]},
+    "F-PIPE-HYD": {"color": 10, "discipline": "Firefighting",
+                    "description": "Ống họng nước vách tường / trụ cứu hỏa (Standpipe / Hydrant)",
+                    "keywords": ["ONGHONGNUOC", "STANDPIPE", "HYDRANTPIPE", "ONGTRUCUUHOA", "HONGNUOCVACHTUONG"]},
+    "F-EQUIP": {"color": 9, "discipline": "Firefighting",
+                "description": "Thiết bị PCCC (Bơm chữa cháy/Bình chữa cháy)",
+                "keywords": ["THIETBIPCCC", "BOMCHUACHAY", "FIREPUMP", "FIREEQUIP"]},
     "F-DETECT": {"color": 200, "discipline": "Firefighting", "description": "Đầu báo cháy",
                  "keywords": ["DAUBAOCHAY", "SMOKEDETECTOR", "FIREDETECTOR", "BAOCHAY"]},
+    "F-ALARM-DEVICE": {"color": 201, "discipline": "Firefighting",
+                        "description": "Chuông / Còi / Đèn báo cháy (Bell/Strobe/Manual Call Point)",
+                        "keywords": ["CHUONGBAOCHAY", "COIBAOCHAY", "MANUALCALLPOINT", "FIREBELL", "FIREALARMDEVICE"]},
+    "F-GAS-SUPPRESS": {"color": 202, "discipline": "Firefighting",
+                        "description": "Hệ thống chữa cháy khí (FM200 / Khí sạch)",
+                        "keywords": ["CHUACHAYKHI", "GASSUPPRESSION", "FM200", "CLEANAGENT", "KHISACH"]},
+    "F-EXTINGUISHER": {"color": 203, "discipline": "Firefighting", "description": "Bình chữa cháy xách tay",
+                        "keywords": ["BINHCHUACHAY", "FIREEXTINGUISHER", "BINHBOTBC"]},
 
+    # ---------------------------------------------------------------- GENERAL
     "G-TEXT": {"color": 7, "discipline": "General", "description": "Chữ ghi chú",
                "keywords": ["GHICHU", "NOTETEXT", "ANNOTATION"]},
     "G-DIM": {"color": 7, "discipline": "General", "description": "Kích thước",
@@ -75,10 +138,10 @@ LAYER_STANDARD = {
 LAYER_LINETYPE = "Continuous"
 
 BLOCK_STANDARD = {
-    "DIFFUSER_SUPPLY": {"discipline": "Mechanical", "ma_hieu": "M-DIFF-S", "default_layer": "M-DUCT-SUPPLY",
+    "DIFFUSER_SUPPLY": {"discipline": "Mechanical", "ma_hieu": "M-DIFF-S", "default_layer": "M-SAD",
                          "description": "Miệng gió cấp (Supply Diffuser)",
                          "keywords": ["MIENGGIOCAP", "SUPPLYDIFFUSER", "DIFFUSERCAP", "GIOCAPSA"]},
-    "DIFFUSER_RETURN": {"discipline": "Mechanical", "ma_hieu": "M-DIFF-R", "default_layer": "M-DUCT-RETURN",
+    "DIFFUSER_RETURN": {"discipline": "Mechanical", "ma_hieu": "M-DIFF-R", "default_layer": "M-RAD",
                          "description": "Miệng gió hồi (Return Diffuser)",
                          "keywords": ["MIENGGIOHOI", "RETURNDIFFUSER", "DIFFUSERHOI", "GIOHOIRA"]},
     "FCU": {"discipline": "Mechanical", "ma_hieu": "M-FCU", "default_layer": "M-EQUIP",
@@ -105,6 +168,15 @@ BLOCK_STANDARD = {
 }
 
 
+def normalize(name: str) -> str:
+    """Chuẩn hóa chuỗi để so khớp: bỏ dấu tiếng Việt, viết hoa, chỉ giữ chữ/số."""
+    if not name:
+        return ""
+    decomposed = unicodedata.normalize("NFD", name)
+    stripped = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+    return "".join(ch for ch in stripped.upper() if ch.isalnum())
+
+
 def _register_canonical_names_as_keywords(registry: dict) -> None:
     """Cho phép tên đã đúng chuẩn (chỉ khác hoa/thường hoặc dấu gạch ngang) cũng tự
     khớp về chính nó, thay vì chỉ khớp qua các keyword liệt kê thủ công."""
@@ -119,14 +191,21 @@ _register_canonical_names_as_keywords(BLOCK_STANDARD)
 
 
 def _best_keyword_match(normalized_name: str, registry: dict) -> str | None:
-    """Trả về key trong `registry` có keyword khớp dài nhất (khớp cụ thể nhất) với
-    `normalized_name`, hoặc None nếu không có keyword nào khớp."""
+    """Trả về key trong `registry` có keyword khớp dài nhất (khớp cụ thể nhất) nằm
+    TRONG `normalized_name`, hoặc None nếu không có keyword nào khớp.
+
+    Cố ý CHỈ so khớp một chiều (keyword là chuỗi con của tên) chứ không so khớp
+    ngược lại (tên là chuỗi con của keyword) — vì chiều ngược dễ gây nhầm giữa các
+    ký hiệu viết tắt ngắn dùng chung một phần chữ, ví dụ layer tên "EAD" (Exhaust)
+    sẽ vô tình khớp "KEAD" (Kitchen Exhaust) nếu so khớp 2 chiều, do "EAD" là chuỗi
+    con của "KEAD". So khớp 1 chiều + ưu tiên keyword dài nhất giải quyết đúng cả 2
+    trường hợp: "EAD" chỉ khớp M-EAD, "KEAD" khớp M-KEAD (khớp dài hơn, cụ thể hơn).
+    """
     best_key, best_len = None, 0
     for key, meta in registry.items():
         for kw in meta.get("keywords", ()):
-            if kw and (kw in normalized_name or normalized_name in kw):
-                if len(kw) > best_len:
-                    best_key, best_len = key, len(kw)
+            if kw and kw in normalized_name and len(kw) > best_len:
+                best_key, best_len = key, len(kw)
     return best_key
 
 

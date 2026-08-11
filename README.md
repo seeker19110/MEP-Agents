@@ -50,7 +50,13 @@ Xây dựng bằng **LangGraph**, giao diện **Streamlit**, theo nguyên tắc
 - 🧭 **Chuẩn hóa Layer/Block bản vẽ khách đẩy vào**: `standardize_cad_drawing` đối chiếu
   với bảng tiêu chuẩn nội bộ (`src/cad_standards.py`) để tự đổi tên Layer (kèm sửa màu),
   đổi tên Block, và gắn thuộc tính MA_HIEU/MO_TA — chỉ sửa đặt tên/thuộc tính, không đụng
-  hình học. Lưu ý: đây KHÔNG phải "Block động" (Dynamic Block) kiểu AutoCAD Block Editor —
+  hình học. Bảng tiêu chuẩn phủ đủ 4 hệ: **Mechanical** (ống gió SAD/RAD/FAD/EAD/KEAD/
+  PAD/SEAD, ống đồng gas lạnh, ống nước ngưng, ống nước lạnh Chiller cấp/hồi CHWS/CHWR),
+  **Electrical** (đèn thường/đèn sự cố, ổ cắm, máng cáp/trunking, tủ điện, máy phát điện,
+  chống sét, ELV data/CCTV/kiểm soát vào ra), **Plumbing** (cấp nước lạnh/nóng sinh hoạt,
+  hồi nước nóng, thoát nước thải/thông hơi/nước mưa), **Firefighting** (Sprinkler, họng
+  nước vách tường/trụ cứu hỏa, đầu báo/chuông còi báo cháy, chữa cháy khí, bình chữa cháy).
+  Lưu ý: đây KHÔNG phải "Block động" (Dynamic Block) kiểu AutoCAD Block Editor —
   Visibility State/Parameter/Action là định dạng nhị phân độc quyền của Autodesk mà thư
   viện `ezdxf` không hỗ trợ ghi; muốn dùng Block động thật sự phải vẽ tay 1 lần trong
   AutoCAD/BricsCAD rồi đưa vào `data/blocks/mepf_library.dxf`, hệ thống sẽ tự copy/chèn

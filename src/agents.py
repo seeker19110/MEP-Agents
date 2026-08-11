@@ -272,9 +272,11 @@ def cad_agent_node(state: AgentState):
       file — chỉ cần một lần gọi tool duy nhất, tránh phải tự phán đoán từng lỗi.
     - CHUẨN HÓA TÊN LAYER/BLOCK (khi khách yêu cầu "chuẩn hóa", "đặt đúng chuẩn", hoặc than phiền bản vẽ khách
       hàng đẩy vào đặt tên/layer/mô tả lung tung, không theo tiêu chuẩn văn phòng): gọi tool
-      `standardize_cad_drawing(file_path=...)`. Tool tự đối chiếu với bảng chuẩn nội bộ (`src/cad_standards.py`)
-      để đổi tên Layer về đúng chuẩn (kèm sửa màu/linetype/mô tả), đổi tên Block về đúng chuẩn, và gắn thuộc
-      tính MA_HIEU/MO_TA vào từng Block — CHỈ sửa tên/thuộc tính, KHÔNG động vào hình học. Layer/Block không
+      `standardize_cad_drawing(file_path=...)`. Tool tự đối chiếu với bảng chuẩn nội bộ (`src/cad_standards.py`,
+      phủ đủ 4 hệ M/E/P/F — ống gió SAD/RAD/FAD/EAD/KEAD/PAD/SEAD, ống đồng/nước ngưng/CHWS/CHWR, đèn/ổ cắm/
+      máng cáp/tủ điện/ELV, cấp thoát nước sinh hoạt, Sprinkler/họng nước/báo cháy...) để đổi tên Layer về đúng
+      chuẩn (kèm sửa màu/linetype/mô tả), đổi tên Block về đúng chuẩn, và gắn thuộc tính MA_HIEU/MO_TA vào từng
+      Block — CHỈ sửa tên/thuộc tính, KHÔNG động vào hình học. Layer/Block không
       nhận diện được sẽ được liệt kê ra để khách tự kiểm tra, không được tự suy diễn bừa. Đây KHÔNG phải là vẽ
       Block động (Dynamic Block) kiểu AutoCAD Block Editor — công cụ này không thể tạo Visibility
       State/Parameter/Action vì đó là định dạng nhị phân độc quyền của Autodesk mà thư viện ezdxf không hỗ trợ
