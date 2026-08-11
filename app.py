@@ -1,11 +1,14 @@
 import streamlit as st
 from langchain_core.messages import HumanMessage
 from src.graph import app as graph_app
+from src.workspace import set_workspace_dir, get_project_root
+from src.logging_config import setup_logging
 import uuid
 import os
 import time
 import pandas as pd
 
+setup_logging()
 st.set_page_config(page_title="Văn phòng MEPF Hoàn hảo", layout="wide", page_icon="🏢")
 
 # 1. Header Trang web (Gọn gàng, Cố định đỉnh)
@@ -17,33 +20,43 @@ if "thread_id" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+# Mỗi phiên (thread_id) có thư mục làm việc riêng biệt: tránh người dùng A thấy/xóa
+# được file của người dùng B khi nhiều người cùng dùng chung một server Streamlit.
+# Được set lại (idempotent) mỗi lần rerun để đảm bảo mọi tool (chạy trong cùng thread)
+# luôn thấy đúng workspace của phiên hiện tại.
+WORKSPACE_DIR = set_workspace_dir(
+    os.path.join(get_project_root(), "outputs", st.session_state.thread_id)
+)
+
 # 2. Sidebar - Quản lý Hồ sơ
 with st.sidebar:
     st.header("📂 Trạm Quản lý Hồ sơ")
     uploaded_file = st.file_uploader("Tải lên bản vẽ (.dxf) hoặc báo cáo (.pdf, .xlsx)...", type=['dxf', 'pdf', 'xlsx'])
     if uploaded_file:
-        file_path = os.path.join(os.getcwd(), uploaded_file.name)
+        # Chỉ giữ lại tên file (basename) để chặn path traversal từ tên file upload.
+        safe_name = os.path.basename(uploaded_file.name)
+        file_path = os.path.join(WORKSPACE_DIR, safe_name)
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
-        st.success(f"Đã lưu thành công: {uploaded_file.name}")
-        
+        st.success(f"Đã lưu thành công: {safe_name}")
+
     st.divider()
     st.header("📥 File Báo cáo (Download)")
     st.info("Sau khi QS hoặc CAD Agent tạo file xong, tải về tại đây.")
-    files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.docx', '.dxf')) and os.path.isfile(f)]
+    files = [f for f in os.listdir(WORKSPACE_DIR) if f.endswith(('.xlsx', '.docx', '.dxf')) and os.path.isfile(os.path.join(WORKSPACE_DIR, f))]
     for f in files:
         col1, col2 = st.columns([0.8, 0.2])
         with col1:
-            with open(f, "rb") as file:
+            with open(os.path.join(WORKSPACE_DIR, f), "rb") as file:
                 st.download_button(label=f"⬇️ {f}", data=file, file_name=f, key=f"dl_{f}")
         with col2:
             if st.button("🗑️", key=f"del_side_{f}", help=f"Xóa file {f}"):
                 try:
-                    os.remove(f)
+                    os.remove(os.path.join(WORKSPACE_DIR, f))
                     st.rerun()
                 except Exception as e:
                     st.error(f"Lỗi: {e}")
-            
+
     st.divider()
     st.header("⚙️ Cấu hình hệ thống")
     st.caption("Khởi chạy với Project Manager, MEPF Agents (Tra cứu Tiêu chuẩn), CAD và QS Agents.")
@@ -57,7 +70,7 @@ tab_chat, tab_excel, tab_cad = st.tabs([
 
 with tab_excel:
     st.header("📊 Xem trực tiếp Bảng tính Dự toán Excel")
-    excel_files = [f for f in os.listdir('.') if f.endswith('.xlsx') and os.path.isfile(f)]
+    excel_files = [f for f in os.listdir(WORKSPACE_DIR) if f.endswith('.xlsx') and os.path.isfile(os.path.join(WORKSPACE_DIR, f))]
     if excel_files:
         col_sel, col_del = st.columns([0.85, 0.15])
         with col_sel:
@@ -67,14 +80,15 @@ with tab_excel:
             st.write("")
             if selected_excel and st.button("🗑️ Xóa file", key=f"del_tab_{selected_excel}"):
                 try:
-                    os.remove(selected_excel)
+                    os.remove(os.path.join(WORKSPACE_DIR, selected_excel))
                     st.rerun()
                 except Exception as e:
                     st.error(f"Lỗi: {e}")
-                    
-        if selected_excel and os.path.exists(selected_excel):
+
+        selected_excel_path = os.path.join(WORKSPACE_DIR, selected_excel) if selected_excel else None
+        if selected_excel_path and os.path.exists(selected_excel_path):
             try:
-                df = pd.read_excel(selected_excel)
+                df = pd.read_excel(selected_excel_path)
                 st.success(f"Đã nạp file thành công: **{selected_excel}** ({len(df)} dòng dữ liệu)")
                 st.dataframe(df, use_container_width=True)
             except Exception as e:
@@ -84,7 +98,7 @@ with tab_excel:
 
 with tab_cad:
     st.header("🖼️ Xem trực tiếp Bản vẽ CAD sắc nét (Computer Vision)")
-    cad_files = [f for f in os.listdir('.') if f.endswith(('.dxf', '.dwg')) and os.path.isfile(f)]
+    cad_files = [f for f in os.listdir(WORKSPACE_DIR) if f.endswith(('.dxf', '.dwg')) and os.path.isfile(os.path.join(WORKSPACE_DIR, f))]
     if cad_files:
         col_cad_sel, col_cad_btn = st.columns([0.7, 0.3])
         with col_cad_sel:
@@ -93,9 +107,11 @@ with tab_cad:
             st.write("")
             st.write("")
             render_clicked = st.button("📸 Xuất ảnh CAD Trực quan", key="btn_render_cad", use_container_width=True, type="primary")
-            
-        preview_png_path = f"preview_{selected_cad}.png"
-        
+
+        selected_cad_path = os.path.join(WORKSPACE_DIR, selected_cad)
+        preview_png_path = os.path.join(WORKSPACE_DIR, f"preview_{selected_cad}.png")
+        fallback_preview_path = os.path.join(WORKSPACE_DIR, "cad_preview.png")
+
         if render_clicked and selected_cad:
             with st.spinner("🎨 Đang render bản vẽ CAD thành hình ảnh PNG sắc nét..."):
                 try:
@@ -103,8 +119,8 @@ with tab_cad:
                     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
                     import matplotlib.pyplot as plt
                     import ezdxf
-                    
-                    doc = ezdxf.readfile(selected_cad)
+
+                    doc = ezdxf.readfile(selected_cad_path)
                     msp = doc.modelspace()
                     fig = plt.figure(figsize=(14, 9), dpi=150)
                     ax = fig.add_axes([0, 0, 1, 1])
@@ -116,11 +132,11 @@ with tab_cad:
                     st.success(f"Đã tạo ảnh CAD trực quan thành công!")
                 except Exception as e:
                     st.error(f"Lỗi render ảnh CAD: {e}")
-                    
+
         if os.path.exists(preview_png_path):
             st.image(preview_png_path, caption=f"🖼️ Hình ảnh trực quan của bản vẽ: {selected_cad}", use_container_width=True)
-        elif os.path.exists("cad_preview.png"):
-            st.image("cad_preview.png", caption="🖼️ Hình ảnh trực quan của bản vẽ CAD gần nhất", use_container_width=True)
+        elif os.path.exists(fallback_preview_path):
+            st.image(fallback_preview_path, caption="🖼️ Hình ảnh trực quan của bản vẽ CAD gần nhất", use_container_width=True)
         else:
             st.info("Nhấp nút '📸 Xuất ảnh CAD Trực quan' ở trên để render và xem hình ảnh bản vẽ sắc nét!")
     else:
@@ -153,8 +169,8 @@ with tab_chat:
             st.markdown(user_input)
             
         with st.chat_message("assistant"):
-            # Quét các file có sẵn trong hệ thống để tiêm vào Ngữ cảnh cho Agents
-            project_files = [f for f in os.listdir('.') if f.endswith(('.dxf', '.pdf', '.xlsx', '.docx')) and os.path.isfile(f)]
+            # Quét các file có sẵn trong workspace của phiên này để tiêm vào Ngữ cảnh cho Agents
+            project_files = [f for f in os.listdir(WORKSPACE_DIR) if f.endswith(('.dxf', '.pdf', '.xlsx', '.docx')) and os.path.isfile(os.path.join(WORKSPACE_DIR, f))]
             file_context = ""
             if project_files:
                 file_context = f"\n\n[THÔNG TIN HỆ THỐNG: Danh sách các file hồ sơ/bản vẽ ĐANG CÓ SẴN trong dự án gồm: {project_files}. Hãy chọn file phù hợp nhất từ danh sách này nếu người dùng không chỉ định tên file cụ thể]."

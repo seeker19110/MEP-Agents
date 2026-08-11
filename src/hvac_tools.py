@@ -1,6 +1,9 @@
 from langchain_core.tools import tool
 import CoolProp.HumidAirProp as HA
 import math
+import logging
+
+logger = logging.getLogger(__name__)
 
 @tool
 def calc_psychrometrics(T_drybulb: float, RH: float) -> str:
@@ -12,7 +15,7 @@ def calc_psychrometrics(T_drybulb: float, RH: float) -> str:
     Trả về: Entanpi (kJ/kg), Độ ẩm tuyệt đối (g/kg), Nhiệt độ đọng sương (Dew point).
     Rất cần thiết để tính công suất lạnh.
     """
-    print(f"\n[Tool] Calculating Psychrometrics: T={T_drybulb}°C, RH={RH}%")
+    logger.info(f"Calculating Psychrometrics: T={T_drybulb}°C, RH={RH}%")
     try:
         T_K = T_drybulb + 273.15
         P_atm = 101325  # Pa
@@ -35,7 +38,7 @@ def calc_duct_size(airflow_lps: float, max_velocity: float = 8.0, max_friction: 
     - max_friction: Tổn thất ma sát tối đa (Pa/m).
     Trả về đường kính ống tròn và các tùy chọn kích thước ống chữ nhật (W x H) khả thi.
     """
-    print(f"\n[Tool] Calculating Duct Size: Q={airflow_lps} L/s")
+    logger.info(f"Calculating Duct Size: Q={airflow_lps} L/s")
     try:
         Q = airflow_lps / 1000.0  # m3/s
         if Q <= 0: return "Lưu lượng phải lớn hơn 0."
@@ -69,7 +72,7 @@ def calc_cooling_load(area_m2: float, space_type: str = "van_phong") -> str:
     - space_type: "van_phong", "hoi_truong", "nha_hang", "server_room".
     Trả về công suất lạnh.
     """
-    print(f"\n[Tool] Calculating Cooling Load: {area_m2} m2, {space_type}")
+    logger.info(f"Calculating Cooling Load: {area_m2} m2, {space_type}")
     try:
         factors = {"van_phong": 200, "hoi_truong": 250, "nha_hang": 300, "server_room": 600}
         factor = factors.get(space_type.lower(), 200)
@@ -93,7 +96,7 @@ def calc_chw_pipe_size(cooling_load_kw: float, delta_t: float = 5.5, max_velocit
     - max_velocity: Vận tốc nước tối đa (m/s, thường 1.2 - 2.5).
     Trả về lưu lượng (L/s, GPM) và kích thước ống danh định (DN).
     """
-    print(f"\n[Tool] Calculating CHW Pipe: Load={cooling_load_kw}kW")
+    logger.info(f"Calculating CHW Pipe: Load={cooling_load_kw}kW")
     try:
         flow_lps = cooling_load_kw / (4.18 * delta_t)
         flow_gpm = flow_lps * 15.85
@@ -128,7 +131,7 @@ def calc_pump_fan_power(flow_rate_lps: float, pressure_drop_pa: float, efficienc
     - efficiency: Hiệu suất tổng (0.1 đến 1.0, thường 0.6 - 0.8).
     Trả về công suất trục (kW) để kỹ sư Điện chọn cáp.
     """
-    print(f"\n[Tool] Calculating Motor Power: Q={flow_rate_lps}L/s, H={pressure_drop_pa}Pa")
+    logger.info(f"Calculating Motor Power: Q={flow_rate_lps}L/s, H={pressure_drop_pa}Pa")
     try:
         Q_m3s = flow_rate_lps / 1000
         power_w = (Q_m3s * pressure_drop_pa) / efficiency
@@ -151,7 +154,7 @@ def calc_ventilation_rate(area_m2: float, height_m: float, ach: float) -> str:
     - ach: Bội số tuần hoàn (Air Changes per Hour - Lần/giờ).
     Trả về lưu lượng yêu cầu (m3/h và L/s).
     """
-    print(f"\n[Tool] Calculating Ventilation: V={area_m2 * height_m}m3, ACH={ach}")
+    logger.info(f"Calculating Ventilation: V={area_m2 * height_m}m3, ACH={ach}")
     try:
         volume = area_m2 * height_m
         flow_m3h = volume * ach

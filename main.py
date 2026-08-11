@@ -2,6 +2,9 @@ import sys
 from langchain_core.messages import HumanMessage
 from src.graph import app
 from src.config import settings
+from src.logging_config import setup_logging
+
+setup_logging()
 
 def print_stream(stream):
     for s in stream:

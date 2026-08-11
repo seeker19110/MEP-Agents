@@ -7,29 +7,25 @@ from typing import Literal
 from src.tools import tools
 
 from dotenv import load_dotenv
+from functools import lru_cache
+import logging
 import os
 
-def get_llm():
-    load_dotenv(override=True)
-    provider = os.getenv("LLM_PROVIDER", "openai").lower().strip()
-    model_name = os.getenv("MODEL_NAME", "").strip()
-    
+logger = logging.getLogger(__name__)
+
+@lru_cache(maxsize=16)
+def _build_llm(provider: str, model_name: str, api_key: str):
+    """Construct the actual LLM client. Cached by (provider, model, key) so repeated
+    agent turns reuse one client instead of re-instantiating on every node call, while
+    still picking up hot-reloaded .env changes (a different key/model busts the cache)."""
     if provider == "groq":
         from langchain_groq import ChatGroq
-        key = os.getenv("GROQ_API_KEY", "") or "dummy_key"
-        if not model_name or "gpt" in model_name or "gemini" in model_name or "3.1" in model_name:
-            model_name = "llama-3.3-70b-versatile"
-        return ChatGroq(model=model_name, api_key=key, temperature=0)
+        return ChatGroq(model=model_name, api_key=api_key or "dummy_key", temperature=0)
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        key = os.getenv("GOOGLE_API_KEY", "") or "dummy_key"
-        if not model_name or "gpt" in model_name or "llama" in model_name:
-            model_name = "gemini-1.5-flash"
-        return ChatGoogleGenerativeAI(model=model_name, google_api_key=key, temperature=0)
+        return ChatGoogleGenerativeAI(model=model_name, google_api_key=api_key or "dummy_key", temperature=0)
     elif provider == "ollama":
         from langchain_openai import ChatOpenAI
-        if not model_name or "gpt" in model_name or "gemini" in model_name:
-            model_name = "llama3.1:8b"
         return ChatOpenAI(
             base_url="http://localhost:11434/v1",
             api_key="ollama",
@@ -38,10 +34,32 @@ def get_llm():
         )
     else:
         from langchain_openai import ChatOpenAI
-        key = os.getenv("OPENAI_API_KEY", "") or "dummy_key"
+        return ChatOpenAI(model=model_name, api_key=api_key or "dummy_key", temperature=0)
+
+def get_llm():
+    load_dotenv(override=True)
+    provider = os.getenv("LLM_PROVIDER", "openai").lower().strip()
+    model_name = os.getenv("MODEL_NAME", "").strip()
+
+    if provider == "groq":
+        key = os.getenv("GROQ_API_KEY", "")
+        if not model_name or "gpt" in model_name or "gemini" in model_name or "3.1" in model_name:
+            model_name = "llama-3.3-70b-versatile"
+    elif provider == "gemini":
+        key = os.getenv("GOOGLE_API_KEY", "")
+        if not model_name or "gpt" in model_name or "llama" in model_name:
+            model_name = "gemini-1.5-flash"
+    elif provider == "ollama":
+        key = ""
+        if not model_name or "gpt" in model_name or "gemini" in model_name:
+            model_name = "llama3.1:8b"
+    else:
+        provider = "openai"
+        key = os.getenv("OPENAI_API_KEY", "")
         if not model_name or "llama" in model_name or "gemini" in model_name:
             model_name = "gpt-4o-mini"
-        return ChatOpenAI(model=model_name, api_key=key, temperature=0)
+
+    return _build_llm(provider, model_name, key)
 
 def call_mepf_agent(state: AgentState, system_prompt: str, agent_name: str):
     messages = state.get("messages", [])
@@ -159,7 +177,15 @@ Nếu thông tin sai kỹ thuật hoặc thiếu căn cứ, hãy REJECT.""")
             response = AIMessage(content=f"[Reviewer Agent] PHÊ DUYỆT: Phương án kỹ thuật hợp lệ.", name="ReviewerAgent")
             return {"messages": [response], "errors": []}
     except Exception as e:
-        response = AIMessage(content=f"[Reviewer Agent] PHÊ DUYỆT: Phương án kỹ thuật hợp lệ.", name="ReviewerAgent")
+        # Không được ngầm coi lỗi kết nối/parsing là "PHÊ DUYỆT" (fail-open che giấu sự cố
+        # kiểm duyệt thật sự). Thông báo rõ là CHƯA kiểm duyệt được thay vì báo sai trạng thái;
+        # nội dung không chứa "TỪ CHỐI" nên Supervisor vẫn kết thúc lượt (FINISH) thay vì loop lại.
+        logger.warning("Reviewer LLM call failed: %s", e)
+        response = AIMessage(
+            content=f"[Reviewer Agent] LỖI HỆ THỐNG: Không thể thực hiện đánh giá kỹ thuật do lỗi kết nối AI ({e}). "
+                    f"Kết quả CHƯA được kiểm duyệt — vui lòng kiểm tra cấu hình API/Provider và thử lại.",
+            name="ReviewerAgent"
+        )
         return {"messages": [response], "errors": []}
 
 # --- 9. Supervisor Agent (Project Manager) ---
@@ -214,6 +240,5 @@ QUY TẮC THÉP (LUẬT PHÊ DUYỆT):
         return {"next": next_agent}
     except Exception as e:
         error_msg = f"Lỗi Giám đốc Dự án ({os.getenv('LLM_PROVIDER', 'openai')}): {str(e)}"
-        print(f"[PM] Lỗi định tuyến: {error_msg}")
-        from langchain_core.messages import AIMessage
+        logger.error("[PM] Lỗi định tuyến: %s", error_msg)
         return {"messages": [AIMessage(content=error_msg, name="ProjectManager")], "next": "FINISH"}

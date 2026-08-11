@@ -1,10 +1,13 @@
 from langchain_core.tools import tool
 import math
+import logging
+
+logger = logging.getLogger(__name__)
 
 @tool
 def calc_sprinkler_qty(area_m2: float, hazard_class: str = "light") -> str:
     """Tính số lượng đầu phun Sprinkler tối thiểu dựa trên diện tích."""
-    print(f"\n[Tool] Calculating Sprinklers: Area={area_m2}, Hazard={hazard_class}")
+    logger.info(f"Calculating Sprinklers: Area={area_m2}, Hazard={hazard_class}")
     try:
         coverage = 12.0
         if hazard_class.lower() == "light":
@@ -24,7 +27,7 @@ def calc_sprinkler_qty(area_m2: float, hazard_class: str = "light") -> str:
 @tool
 def calc_fire_pump(hazard_class: str = "ordinary") -> str:
     """Tính lưu lượng bơm PCCC sơ bộ."""
-    print(f"\n[Tool] Calculating Fire Pump: Hazard={hazard_class}")
+    logger.info(f"Calculating Fire Pump: Hazard={hazard_class}")
     try:
         if hazard_class.lower() == "light":
             flow_gpm = 500
@@ -44,7 +47,7 @@ def calc_fire_pump(hazard_class: str = "ordinary") -> str:
 @tool
 def calc_extinguisher_qty(area_m2: float) -> str:
     """Bố trí số lượng bình chữa cháy xách tay."""
-    print(f"\n[Tool] Calculating Extinguishers: Area={area_m2}")
+    logger.info(f"Calculating Extinguishers: Area={area_m2}")
     try:
         qty = math.ceil(area_m2 / 50.0)
         return (f"Bố trí bình chữa cháy ({area_m2} m2):\n"

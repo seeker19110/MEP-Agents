@@ -15,3 +15,6 @@ __pycache__/
 
 # Giữ lại duy nhất Thư viện Block mẫu chuẩn của hệ thống
 !data/blocks/mepf_library.dxf
+
+# Thư mục làm việc riêng theo từng phiên Streamlit (per-session workspace, xem src/workspace.py)
+outputs/

@@ -1,10 +1,13 @@
 from langchain_core.tools import tool
 import math
+import logging
+
+logger = logging.getLogger(__name__)
 
 @tool
 def calc_cable_size(power_kw: float, voltage: float = 380, cos_phi: float = 0.85, phase: int = 3) -> str:
     """Tính tiết diện cáp dẫn điện dựa trên công suất phụ tải."""
-    print(f"\n[Tool] Calculating Cable Size: P={power_kw}kW")
+    logger.info(f"Calculating Cable Size: P={power_kw}kW")
     try:
         if phase == 3:
             current_a = (power_kw * 1000) / (math.sqrt(3) * voltage * cos_phi)
@@ -29,7 +32,7 @@ def calc_cable_size(power_kw: float, voltage: float = 380, cos_phi: float = 0.85
 @tool
 def calc_breaker_size(power_kw: float, phase: int = 3) -> str:
     """Tính chọn dòng định mức cho Aptomat (MCB/MCCB) dựa trên công suất."""
-    print(f"\n[Tool] Calculating Breaker: P={power_kw}kW")
+    logger.info(f"Calculating Breaker: P={power_kw}kW")
     try:
         cos_phi = 0.85
         voltage = 380 if phase == 3 else 220
@@ -55,7 +58,7 @@ def calc_breaker_size(power_kw: float, phase: int = 3) -> str:
 @tool
 def calc_lighting_qty(area_m2: float, required_lux: float, lumen_per_lamp: float = 3000) -> str:
     """Tính số lượng đèn chiếu sáng bằng phương pháp quang thông."""
-    print(f"\n[Tool] Calculating Lighting: Area={area_m2}, Lux={required_lux}")
+    logger.info(f"Calculating Lighting: Area={area_m2}, Lux={required_lux}")
     try:
         UF = 0.6  
         MF = 0.8  

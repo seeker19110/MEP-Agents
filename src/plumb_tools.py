@@ -1,10 +1,13 @@
 from langchain_core.tools import tool
 import math
+import logging
+
+logger = logging.getLogger(__name__)
 
 @tool
 def calc_water_pipe(fixture_units: float, is_flush_valve: bool = False) -> str:
     """Tính toán lưu lượng (L/s) và cỡ ống (DN) từ Đương lượng thiết bị (FU)."""
-    print(f"\n[Tool] Calculating Water Pipe: FU={fixture_units}")
+    logger.info(f"Calculating Water Pipe: FU={fixture_units}")
     try:
         if is_flush_valve:
             flow_lps = 0.05 * math.pow(fixture_units, 0.65)
@@ -33,7 +36,7 @@ def calc_water_pipe(fixture_units: float, is_flush_valve: bool = False) -> str:
 @tool
 def calc_water_tank(population: int, liters_per_person: float = 200) -> str:
     """Tính dung tích bể nước ngầm/mái sinh hoạt."""
-    print(f"\n[Tool] Calculating Water Tank: Pop={population}")
+    logger.info(f"Calculating Water Tank: Pop={population}")
     try:
         daily_req_liters = population * liters_per_person
         daily_req_m3 = daily_req_liters / 1000
@@ -51,7 +54,7 @@ def calc_water_tank(population: int, liters_per_person: float = 200) -> str:
 @tool
 def calc_plumbing_pump_head(building_height_m: float, longest_pipe_length_m: float) -> str:
     """Tính cột áp bơm cấp nước (Booster pump / Transfer pump)."""
-    print(f"\n[Tool] Calculating Plumbing Pump Head")
+    logger.info(f"Calculating Plumbing Pump Head")
     try:
         static_head = building_height_m
         friction_head = longest_pipe_length_m * 0.1

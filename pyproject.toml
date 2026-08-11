@@ -24,3 +24,8 @@ dependencies = [
     "streamlit>=1.61.1",
     "tiktoken>=0.13.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

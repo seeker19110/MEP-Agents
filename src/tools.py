@@ -8,6 +8,13 @@ import ezdxf
 from ezdxf import audit
 import math
 import re
+import ast
+import operator as op
+import logging
+from functools import lru_cache
+from src.workspace import resolve_safe_path, get_project_root
+
+logger = logging.getLogger(__name__)
 
 def normalize_mepf_parameter_spec(text: str) -> str:
     """Chuẩn hóa toàn bộ các ký hiệu thông số kỹ thuật MEPF trong CAD về định dạng đồng nhất cho AI:
@@ -31,35 +38,40 @@ def normalize_mepf_parameter_spec(text: str) -> str:
 
 normalize_pipe_diameter_spec = normalize_mepf_parameter_spec
 
+@lru_cache(maxsize=4)
+def _load_vectorstore(api_key: str, index_path: str):
+    """Load (and cache) the FAISS index once per api_key/index_path instead of on every call."""
+    from langchain_openai import OpenAIEmbeddings
+    from langchain_community.vectorstores import FAISS
+
+    embeddings = OpenAIEmbeddings(api_key=api_key)
+    return FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
+
 @tool
 def search_standards(query: str) -> str:
     """Tra cứu Tiêu chuẩn thiết kế MEPF (TCVN, ASHRAE, NFPA...) từ cơ sở dữ liệu nội bộ."""
-    print(f"\n[Tool] Tra cứu tiêu chuẩn thực: {query}")
+    logger.info("Tra cứu tiêu chuẩn thực: %s", query)
     try:
-        from langchain_openai import OpenAIEmbeddings
-        from langchain_community.vectorstores import FAISS
         from src.config import settings
-        import os
-        
+
         api_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "dummy_key_to_prevent_crash_on_import")
-        embeddings = OpenAIEmbeddings(api_key=api_key)
-        
+
         index_path = "faiss_index"
         if not os.path.exists(index_path):
             return "Hệ thống RAG chưa được khởi tạo. Vui lòng thêm tài liệu vào 'data/standards/' và chạy 'uv run python src/ingest.py'."
-            
-        vectorstore = FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
+
+        vectorstore = _load_vectorstore(api_key, index_path)
         docs = vectorstore.similarity_search(query, k=3)
-        
+
         if not docs:
             return "Không tìm thấy thông tin tiêu chuẩn nào khớp với yêu cầu."
-            
+
         result = f"Kết quả RAG Tiêu chuẩn cho '{query}':\n"
         for i, doc in enumerate(docs, 1):
             source = doc.metadata.get('source', 'Unknown')
             result += f"\n--- Trích đoạn {i} (Nguồn: {source}) ---\n"
             result += doc.page_content + "\n"
-            
+
         return result
     except Exception as e:
         return f"Lỗi tra cứu tiêu chuẩn RAG: {e}"
@@ -67,15 +79,33 @@ def search_standards(query: str) -> str:
 @tool
 def search_web(query: str) -> str:
     """Tìm kiếm thông tin trên internet."""
-    print(f"\n[Tool] Searching web for: {query}")
+    logger.info("Searching web for: %s", query)
     return f"Kết quả mô phỏng cho '{query}': Tìm thấy nhiều tài liệu liên quan."
+
+# Chỉ cho phép các toán tử số học thuần túy - không có tên biến, thuộc tính hay lời gọi hàm,
+# nên không thể escape sandbox như với eval() (kể cả khi đã tắt __builtins__).
+_SAFE_OPERATORS = {
+    ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv,
+    ast.Pow: op.pow, ast.Mod: op.mod, ast.FloorDiv: op.floordiv,
+    ast.USub: op.neg, ast.UAdd: op.pos,
+}
+
+def _safe_eval_node(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_OPERATORS:
+        return _SAFE_OPERATORS[type(node.op)](_safe_eval_node(node.left), _safe_eval_node(node.right))
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_OPERATORS:
+        return _SAFE_OPERATORS[type(node.op)](_safe_eval_node(node.operand))
+    raise ValueError("Biểu thức chứa cú pháp không được phép (chỉ hỗ trợ số và các phép toán +-*/%**).")
 
 @tool
 def calculate(expression: str) -> str:
     """Thực hiện tính toán toán học cơ bản (ví dụ: '25 * 4')."""
-    print(f"\n[Tool] Calculating: {expression}")
+    logger.info("Calculating: %s", expression)
     try:
-        result = eval(expression, {"__builtins__": {}})
+        tree = ast.parse(expression, mode="eval")
+        result = _safe_eval_node(tree.body)
         return f"Kết quả: {result}"
     except Exception as e:
         return f"Lỗi tính toán: {e}"
@@ -83,9 +113,10 @@ def calculate(expression: str) -> str:
 @tool
 def list_directory(path: str = ".") -> str:
     """Liệt kê danh sách các file trong thư mục để xem có file nào tồn tại."""
-    print(f"\n[Tool] Listing directory: {path}")
+    logger.info("Listing directory: %s", path)
     try:
-        files = os.listdir(path)
+        safe_path = resolve_safe_path(path)
+        files = os.listdir(safe_path)
         return f"Files trong '{path}': {', '.join(files)}"
     except Exception as e:
         return f"Lỗi đọc thư mục: {e}"
@@ -93,9 +124,9 @@ def list_directory(path: str = ".") -> str:
 @tool
 def read_excel(file_path: str) -> str:
     """Đọc nội dung từ file Excel (.xlsx)."""
-    print(f"\n[Tool] Reading Excel: {file_path}")
+    logger.info("Reading Excel: %s", file_path)
     try:
-        df = pd.read_excel(file_path)
+        df = pd.read_excel(resolve_safe_path(file_path))
         return f"Dữ liệu Excel:\n{df.to_string(index=False)}"
     except Exception as e:
         return f"Lỗi đọc Excel: {e}"
@@ -103,18 +134,19 @@ def read_excel(file_path: str) -> str:
 @tool
 def write_excel(file_path: str, json_data: str) -> str:
     """Tạo hoặc ghi file Excel (.xlsx). json_data là danh sách các object dưới dạng chuỗi JSON đại diện cho các dòng. Ví dụ: '[{"STT": 1, "Vật tư": "Ống", "KL": 10}]'"""
-    print(f"\n[Tool] Writing Excel: {file_path}")
+    logger.info("Writing Excel: %s", file_path)
     try:
         if not file_path.endswith('.xlsx'):
             file_path += '.xlsx'
-            
-        dir_name = os.path.dirname(file_path)
+
+        safe_path = resolve_safe_path(file_path)
+        dir_name = os.path.dirname(safe_path)
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
-            
+
         data = json.loads(json_data)
         df = pd.DataFrame(data)
-        df.to_excel(file_path, index=False)
+        df.to_excel(safe_path, index=False)
         return f"Đã ghi đè/tạo thành công file Excel tại: {file_path}"
     except Exception as e:
         return f"Lỗi ghi Excel: {e}"
@@ -122,9 +154,9 @@ def write_excel(file_path: str, json_data: str) -> str:
 @tool
 def read_word(file_path: str) -> str:
     """Đọc nội dung từ file Word (.docx)."""
-    print(f"\n[Tool] Reading Word: {file_path}")
+    logger.info("Reading Word: %s", file_path)
     try:
-        doc = Document(file_path)
+        doc = Document(resolve_safe_path(file_path))
         full_text = [para.text for para in doc.paragraphs]
         return "\n".join(full_text)
     except Exception as e:
@@ -133,9 +165,10 @@ def read_word(file_path: str) -> str:
 @tool
 def write_word(file_path: str, content: str, font_name: str = 'Arial') -> str:
     """Tạo hoặc ghi file Word (.docx) với nội dung được truyền vào. Tham số font_name hỗ trợ 'Arial' hoặc 'Times New Roman'."""
-    print(f"\n[Tool] Writing Word: {file_path}")
+    logger.info("Writing Word: %s", file_path)
     try:
         from docx.shared import Pt
+        safe_path = resolve_safe_path(file_path)
         doc = Document()
         # Thiết lập Font chữ chuẩn Unicode (Arial / Times New Roman) cho tiếng Việt
         style = doc.styles['Normal']
@@ -144,9 +177,9 @@ def write_word(file_path: str, content: str, font_name: str = 'Arial') -> str:
             font_name = 'Arial'
         font.name = font_name
         font.size = Pt(12)
-        
+
         doc.add_paragraph(content)
-        doc.save(file_path)
+        doc.save(safe_path)
         return f"Đã lưu nội dung vào file Word tại: {file_path} (Font: {font_name})"
     except Exception as e:
         return f"Lỗi ghi Word: {e}"
@@ -154,22 +187,22 @@ def write_word(file_path: str, content: str, font_name: str = 'Arial') -> str:
 @tool
 def read_pdf(file_path: str) -> str:
     """Đọc và trích xuất toàn bộ văn bản từ file PDF."""
-    print(f"\n[Tool] Reading PDF: {file_path}")
+    logger.info("Reading PDF: %s", file_path)
     try:
-        reader = PdfReader(file_path)
+        reader = PdfReader(resolve_safe_path(file_path))
         text = ""
         for page in reader.pages:
             text += page.extract_text() + "\n"
-        return f"Nội dung PDF ({len(reader.pages)} trang):\n{text[:5000]}..." 
+        return f"Nội dung PDF ({len(reader.pages)} trang):\n{text[:5000]}..."
     except Exception as e:
         return f"Lỗi đọc PDF: {e}"
 
 @tool
 def read_cad(file_path: str) -> str:
     """Đọc file CAD (.dxf) và trả về thống kê thư viện block, block attributes, chiều dài, và layer sau khi đã làm sạch."""
-    print(f"\n[Tool] Reading, Cleaning & Extracting CAD: {file_path}")
+    logger.info("Reading, Cleaning & Extracting CAD: %s", file_path)
     try:
-        doc = ezdxf.readfile(file_path)
+        doc = ezdxf.readfile(resolve_safe_path(file_path))
         
         auditor = audit.Auditor(doc)
         auditor.run()
@@ -257,40 +290,63 @@ def read_cad(file_path: str) -> str:
 @tool
 def write_cad(file_path: str, layers: str) -> str:
     """Tạo một file CAD mới (.dxf) sạch sẽ với các layer định trước. Tham số layers: chuỗi ngăn cách bởi dấu phẩy."""
-    print(f"\n[Tool] Writing CAD: {file_path}")
+    logger.info("Writing CAD: %s", file_path)
     try:
+        safe_path = resolve_safe_path(file_path)
         doc = ezdxf.new('R2010')
         layer_list = [l.strip() for l in layers.split(',') if l.strip()]
         for layer in layer_list:
             doc.layers.add(name=layer)
-            
-        doc.saveas(file_path)
+
+        doc.saveas(safe_path)
         return f"Đã tạo thành công bản vẽ CAD tại {file_path} với các layers: {', '.join(layer_list)}"
     except Exception as e:
         return f"Lỗi tạo CAD (.dxf): {e}"
 
 import sys
 from io import StringIO
+import builtins
+
+# Sandbox cho execute_python_code: chỉ cho phép các builtin an toàn (không có open/eval/exec/input)
+# và chỉ cho phép import các module cần thiết cho việc dựng Block ezdxf (ezdxf, math, json).
+# Đây KHÔNG phải cô lập tuyệt đối (không thay thế container/subprocess sandbox thật sự),
+# nhưng chặn được các vector tấn công rõ ràng nhất: đọc/ghi file tùy ý, exec chuỗi động, os/subprocess.
+_ALLOWED_MODULES = {"ezdxf", "math", "json"}
+
+def _sandboxed_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name.split(".")[0] not in _ALLOWED_MODULES:
+        raise ImportError(f"Module '{name}' không được phép sử dụng trong execute_python_code.")
+    return builtins.__import__(name, globals, locals, fromlist, level)
+
+_SAFE_BUILTIN_NAMES = (
+    "abs", "all", "any", "bool", "dict", "enumerate", "float", "int", "len", "list",
+    "max", "min", "print", "range", "round", "set", "sorted", "str", "sum", "tuple",
+    "zip", "True", "False", "None", "isinstance",
+)
+_SAFE_BUILTINS = {name: getattr(builtins, name) for name in _SAFE_BUILTIN_NAMES}
+_SAFE_BUILTINS["__import__"] = _sandboxed_import
 
 @tool
 def execute_python_code(code: str) -> str:
     """
-    Thực thi mã Python động. 
+    Thực thi mã Python động trong môi trường giới hạn (sandbox).
     Được dùng để Họa viên CAD tự viết code ezdxf vẽ Block mới và lưu vào 'data/blocks/mepf_library.dxf'.
+    Chỉ cho phép import ezdxf/math/json và không có quyền truy cập file/network trực tiếp qua builtin open().
     """
-    print("\n[Tool] Executing Custom Python Code")
+    logger.info("Executing Custom Python Code (sandboxed)")
+    old_stdout = sys.stdout
     try:
-        old_stdout = sys.stdout
         redirected_output = sys.stdout = StringIO()
-        
+
+        safe_globals = {"__builtins__": _SAFE_BUILTINS}
         local_env = {}
-        exec(code, globals(), local_env)
-        
-        sys.stdout = old_stdout
+        exec(code, safe_globals, local_env)
+
         return f"Thực thi Python thành công. Output:\n{redirected_output.getvalue()}"
     except Exception as e:
-        sys.stdout = old_stdout
         return f"Lỗi quá trình thực thi Python: {e}"
+    finally:
+        sys.stdout = old_stdout
 
 @tool
 def ai_block_recovery(file_path: str, layer: str, shape: str, dimensions: str, replacement_block: str) -> str:
@@ -300,18 +356,18 @@ def ai_block_recovery(file_path: str, layer: str, shape: str, dimensions: str, r
     - dimensions: Với circle là 'bán kính' (ví dụ: '100'). Với rectangle là 'dài,rộng' (ví dụ '600,600').
     - replacement_block: Tên Block mới sẽ được chèn vào.
     """
-    print(f"\n[Tool] AI Block Recovery: {file_path}, Layer={layer}, Shape={shape}")
+    logger.info("AI Block Recovery: %s, Layer=%s, Shape=%s", file_path, layer, shape)
     try:
         from ezdxf.addons import importer
-        import os
-        
-        if not os.path.exists(file_path):
+
+        safe_path = resolve_safe_path(file_path)
+        if not os.path.exists(safe_path):
             return f"Lỗi: Không tìm thấy file {file_path}"
-            
-        doc = ezdxf.readfile(file_path)
+
+        doc = ezdxf.readfile(safe_path)
         msp = doc.modelspace()
-        
-        library_path = os.path.join("data", "blocks", "mepf_library.dxf")
+
+        library_path = os.path.join(get_project_root(), "data", "blocks", "mepf_library.dxf")
         lib_doc = None
         if os.path.exists(library_path):
             lib_doc = ezdxf.readfile(library_path)
@@ -388,7 +444,7 @@ def ai_block_recovery(file_path: str, layer: str, shape: str, dimensions: str, r
         for cx, cy in centers:
             msp.add_blockref(replacement_block, (cx, cy), dxfattribs={'layer': layer})
             
-        doc.saveas(file_path)
+        doc.saveas(safe_path)
         return f"AI Recovery thành công: Đã tìm thấy và phục hồi {len(centers)} đối tượng '{shape}' thành Block '{replacement_block}'."
     except Exception as e:
         return f"Lỗi phục hồi Block: {e}"
@@ -402,24 +458,25 @@ def edit_cad(file_path: str, actions_json: str) -> str:
     - Chèn block: {"action": "insert_block", "name": "TU_DIEN", "x": 10, "y": 10, "layer": "MEP_DIEN", "scale": 1.0, "rotation": 0}
     - Đồng bộ font (chống lỗi tiếng Việt): {"action": "fix_fonts", "font_name": "Arial"}
     """
-    print(f"\n[Tool] Editing CAD: {file_path}")
+    logger.info("Editing CAD: %s", file_path)
     try:
-        if not os.path.exists(file_path):
+        safe_path = resolve_safe_path(file_path)
+        if not os.path.exists(safe_path):
             return f"Lỗi: Không tìm thấy file {file_path}"
-            
-        doc = ezdxf.readfile(file_path)
+
+        doc = ezdxf.readfile(safe_path)
         msp = doc.modelspace()
-        
+
         auditor = audit.Auditor(doc)
         auditor.run()
         audit_fixes = len(auditor.fixes)
-        
+
         actions = json.loads(actions_json)
         results = []
-        
+
         # Tải Master Library (Tổng kho Block)
         from ezdxf.addons import importer
-        library_path = os.path.join("data", "blocks", "mepf_library.dxf")
+        library_path = os.path.join(get_project_root(), "data", "blocks", "mepf_library.dxf")
         lib_doc = None
         if os.path.exists(library_path):
             lib_doc = ezdxf.readfile(library_path)
@@ -488,7 +545,7 @@ def edit_cad(file_path: str, actions_json: str) -> str:
                 else:
                     results.append(f"Lỗi: Block '{b_name}' không tồn tại trong bản vẽ và cả Thư viện Trung tâm.")
                     
-        doc.saveas(file_path)
+        doc.saveas(safe_path)
         return f"Đã làm sạch ({audit_fixes} lỗi rác được xóa) và chỉnh sửa thành công {file_path}:\n- " + "\n- ".join(results)
     except Exception as e:
         return f"Lỗi sửa CAD (.dxf): {e}"
@@ -496,21 +553,21 @@ def edit_cad(file_path: str, actions_json: str) -> str:
 @tool
 def render_cad_image(file_path: str, output_png_path: str = "cad_preview.png") -> str:
     """Chuyển đổi file bản vẽ CAD (.dxf) thành hình ảnh PNG sắc nét để hiển thị trực quan (Computer Vision) lên giao diện Web."""
-    print(f"\n[Tool] Rendering CAD to Image: {file_path} -> {output_png_path}")
+    logger.info("Rendering CAD to Image: %s -> %s", file_path, output_png_path)
     try:
         from ezdxf.addons.drawing import RenderContext, Frontend
         from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
         import matplotlib.pyplot as plt
-        
-        doc = ezdxf.readfile(file_path)
+
+        doc = ezdxf.readfile(resolve_safe_path(file_path))
         msp = doc.modelspace()
-        
+
         fig = plt.figure(figsize=(12, 8), dpi=150)
         ax = fig.add_axes([0, 0, 1, 1])
         ctx = RenderContext(doc)
         out = MatplotlibBackend(ax)
         Frontend(ctx, out).draw_layout(msp, finalize=True)
-        fig.savefig(output_png_path, dpi=150, bbox_inches='tight')
+        fig.savefig(resolve_safe_path(output_png_path), dpi=150, bbox_inches='tight')
         plt.close(fig)
         return f"Đã xuất hình ảnh bản vẽ CAD (Computer Vision) thành công tại: {output_png_path}"
     except Exception as e:
@@ -519,9 +576,9 @@ def render_cad_image(file_path: str, output_png_path: str = "cad_preview.png") -
 @tool
 def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) -> str:
     """Phân tích Ngữ cảnh Hình học & Mũi tên Chỉ dẫn (Leaders, Text Annotations, Spatial Matching) để hiểu bản vẽ CAD như con người: tự động liên kết Ghi chú văn bản (ví dụ: 'Ống uPVC Ø110', 'Ống gió 600x400') và Mũi tên chỉ hướng với đúng nét vẽ đường ống kề cận."""
-    print(f"\n[Tool] Analyzing CAD Spatial Context & Arrows: {file_path}")
+    logger.info("Analyzing CAD Spatial Context & Arrows: %s", file_path)
     try:
-        doc = ezdxf.readfile(file_path)
+        doc = ezdxf.readfile(resolve_safe_path(file_path))
         msp = doc.modelspace()
         
         texts = []
