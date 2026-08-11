@@ -32,10 +32,14 @@ def parse_cad_to_db_task(self, dwg_path: str, user_id: str):
     os.makedirs(upload_dir, exist_ok=True)
     
     # Set output excel path
-    output_excel_path = os.path.join(upload_dir, f"boq_{self.request.id}.xlsx")
+    output_excel_path = os.path.join("data", "boq", f"boq_{os.path.basename(dwg_path)}.xlsx")
+    os.makedirs(os.path.dirname(output_excel_path), exist_ok=True)
     
-    # Chạy tool bóc tách thật
-    result_text = auto_quantity_takeoff(dwg_path, output_excel_path)
+    # Invoke StructuredTool
+    result_text = auto_quantity_takeoff.invoke({
+        "file_path": dwg_path,
+        "output_excel_path": output_excel_path
+    })
     
     return {
         "status": "success", 
