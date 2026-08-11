@@ -14,6 +14,7 @@ import logging
 from functools import lru_cache
 from src.workspace import resolve_safe_path, get_project_root
 from src.cad_revision import create_snapshot
+from src import cad_standards
 
 logger = logging.getLogger(__name__)
 
@@ -1009,6 +1010,150 @@ def optimize_cad_drawing(file_path: str, output_path: str = "", dedupe_tolerance
         return f"Lỗi tối ưu bản vẽ CAD: {e}"
 
 
+def _apply_layer_style(layer, std: dict) -> bool:
+    """Áp màu/linetype/mô tả chuẩn lên 1 Layer. Trả về True nếu có thay đổi."""
+    changed = False
+    if layer.dxf.color != std["color"]:
+        layer.dxf.color = std["color"]
+        changed = True
+    if layer.dxf.linetype != cad_standards.LAYER_LINETYPE:
+        layer.dxf.linetype = cad_standards.LAYER_LINETYPE
+        changed = True
+    if layer.description != std["description"]:
+        layer.description = std["description"]
+        changed = True
+    return changed
+
+
+def _ensure_block_attributes(block, std: dict) -> bool:
+    """Gắn ATTDEF MA_HIEU/MO_TA (ẩn, hằng số) vào định nghĩa Block nếu còn thiếu, để
+    khi Block được chèn vào bản vẽ, mã hiệu/mô tả chuẩn luôn đi kèm. Trả về True nếu
+    có ATTDEF mới được thêm."""
+    from ezdxf.lldxf import const as dxf_const
+
+    existing_tags = {a.dxf.tag for a in block.attdefs()}
+    changed = False
+    flags = dxf_const.ATTRIB_INVISIBLE + dxf_const.ATTRIB_CONST
+    if "MA_HIEU" not in existing_tags:
+        block.add_attdef("MA_HIEU", (0, 0), text=std["ma_hieu"],
+                          dxfattribs={"height": 30, "flags": flags, "layer": "0"})
+        changed = True
+    if "MO_TA" not in existing_tags:
+        block.add_attdef("MO_TA", (0, 0), text=std["description"],
+                          dxfattribs={"height": 30, "flags": flags, "layer": "0"})
+        changed = True
+    return changed
+
+
+@tool
+def standardize_cad_drawing(file_path: str, output_path: str = "") -> str:
+    """Chuẩn hóa TÊN LAYER, TÊN BLOCK và MÔ TẢ/MÃ HIỆU của bản vẽ CAD (.dxf) người
+    dùng đẩy vào theo tiêu chuẩn nội bộ MEPF (xem `src/cad_standards.py`). CHỈ sửa
+    đặt tên, màu/linetype của layer, và gắn thuộc tính MA_HIEU/MO_TA vào Block —
+    TUYỆT ĐỐI KHÔNG động vào hình học/nét vẽ, khác với `ai_block_recovery` (phục hồi
+    Block bị vỡ) và `optimize_cad_drawing` (dọn rác hình học).
+    Layer/Block không nhận diện được theo tiêu chuẩn sẽ được liệt kê để người dùng tự
+    kiểm tra thay vì bị đoán bừa. Nếu output_path bỏ trống, ghi đè lên chính file_path.
+    """
+    logger.info("Standardize CAD Drawing: %s", file_path)
+    try:
+        create_snapshot(file_path, note="Trước khi standardize_cad_drawing")
+        safe_path = resolve_safe_path(file_path)
+        if not os.path.exists(safe_path):
+            return f"Lỗi: Không tìm thấy file {file_path}"
+
+        doc = ezdxf.readfile(safe_path)
+        msp = doc.modelspace()
+
+        auditor = audit.Auditor(doc)
+        auditor.run()
+        audit_fixes = len(auditor.fixes)
+
+        renamed_layers = []
+        fixed_layer_props = []
+        unmatched_layers = []
+
+        for layer in list(doc.layers):
+            lname = layer.dxf.name
+            if lname.lower() in ("0", "defpoints"):
+                continue
+            canonical = cad_standards.match_layer(lname)
+            if not canonical:
+                unmatched_layers.append(lname)
+                continue
+            std = cad_standards.LAYER_STANDARD[canonical]
+            if lname == canonical:
+                if _apply_layer_style(layer, std):
+                    fixed_layer_props.append(lname)
+                continue
+            if canonical in doc.layers:
+                moved = 0
+                for e in list(msp.query(f'*[layer=="{lname}"]')):
+                    e.dxf.layer = canonical
+                    moved += 1
+                _apply_layer_style(doc.layers.get(canonical), std)
+                try:
+                    doc.layers.remove(lname)
+                except Exception:
+                    pass
+                renamed_layers.append(f"{lname} -> {canonical} (gộp {moved} đối tượng)")
+            else:
+                layer.rename(canonical)
+                _apply_layer_style(doc.layers.get(canonical), std)
+                renamed_layers.append(f"{lname} -> {canonical}")
+
+        renamed_blocks = []
+        annotated_blocks = []
+        unmatched_blocks = []
+
+        used_block_names = sorted({e.dxf.name for e in msp.query('INSERT') if not e.dxf.name.startswith('*')})
+        for bname in used_block_names:
+            target_name = bname
+            canonical = cad_standards.match_block(bname)
+            if not canonical:
+                unmatched_blocks.append(bname)
+                continue
+            if canonical != bname:
+                if canonical in doc.blocks:
+                    unmatched_blocks.append(
+                        f"{bname} (trùng ý nghĩa với Block chuẩn có sẵn '{canonical}' nhưng hình học có thể khác "
+                        f"— cần kiểm tra thủ công, dùng `ai_block_recovery` nếu muốn thay hẳn bằng Block chuẩn)"
+                    )
+                    continue
+                doc.blocks.rename_block(bname, canonical)
+                for ins in msp.query(f'INSERT[name=="{bname}"]'):
+                    ins.dxf.name = canonical
+                renamed_blocks.append(f"{bname} -> {canonical}")
+                target_name = canonical
+
+            std = cad_standards.BLOCK_STANDARD.get(target_name)
+            if std and _ensure_block_attributes(doc.blocks.get(target_name), std):
+                annotated_blocks.append(target_name)
+
+        target_path = output_path.strip() or file_path
+        out_safe_path = resolve_safe_path(target_path)
+        doc.saveas(out_safe_path)
+
+        report = ["CHUẨN HÓA BẢN VẼ THÀNH CÔNG (chỉ sửa tên/layer/mô tả, KHÔNG đổi hình học):"]
+        report.append(f"- Audit sửa {audit_fixes} lỗi cấu trúc.")
+        report.append("- Đổi tên layer về chuẩn: " + ("; ".join(renamed_layers) if renamed_layers else "(không có)"))
+        report.append("- Sửa màu/linetype/mô tả layer đã đúng tên nhưng sai thuộc tính: "
+                       + (", ".join(fixed_layer_props) if fixed_layer_props else "(không có)"))
+        if unmatched_layers:
+            report.append(f"- CẦN REVIEW THỦ CÔNG {len(unmatched_layers)} layer không nhận diện được theo chuẩn: "
+                           + ", ".join(unmatched_layers))
+        report.append("- Đổi tên Block về chuẩn: " + ("; ".join(renamed_blocks) if renamed_blocks else "(không có)"))
+        report.append("- Gắn thuộc tính MA_HIEU/MO_TA cho Block: "
+                       + (", ".join(annotated_blocks) if annotated_blocks else "(không có)"))
+        if unmatched_blocks:
+            report.append(f"- CẦN REVIEW THỦ CÔNG {len(unmatched_blocks)} Block không nhận diện được theo chuẩn: "
+                           + "; ".join(unmatched_blocks))
+        report.append(f"- Đã lưu bản vẽ đã chuẩn hóa tại: {target_path}")
+        return "\n".join(report)
+    except Exception as e:
+        return f"Lỗi chuẩn hóa bản vẽ CAD: {e}"
+
+
 from src.hvac_tools import (
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
     calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
@@ -1038,7 +1183,7 @@ tools = [
     search_standards, search_web, calculate, execute_python_code, list_directory,
     read_excel, write_excel, read_word, write_word, read_pdf,
     read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image, analyze_cad_spatial_context,
-    auto_quantity_takeoff, optimize_cad_drawing,
+    auto_quantity_takeoff, optimize_cad_drawing, standardize_cad_drawing,
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
     calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
     calc_cable_size, calc_breaker_size, calc_lighting_qty, calc_voltage_drop,
@@ -1087,6 +1232,7 @@ TOOLS_BY_ROLE = {
     "cad": _COMMON_TOOLS + [
         read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image,
         analyze_cad_spatial_context, execute_python_code, optimize_cad_drawing,
+        standardize_cad_drawing,
         snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
     ],
     "bim": _COMMON_TOOLS + [

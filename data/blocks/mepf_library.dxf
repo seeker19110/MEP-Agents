@@ -489,7 +489,7 @@ $SKPOLY
   9
 $TDCREATE
  40
-2461263.960023148
+2461264.4103125
   9
 $TDUCREATE
  40
@@ -497,7 +497,7 @@ $TDUCREATE
   9
 $TDUPDATE
  40
-2461263.960023148
+2461264.4103125
   9
 $TDUUPDATE
  40
@@ -549,7 +549,7 @@ $SPLINESEGS
   9
 $HANDSEED
   5
-60
+72
   9
 $SURFTAB1
  70
@@ -929,11 +929,11 @@ $PSTYLEMODE
   9
 $FINGERPRINTGUID
   2
-{7E192BBC-359B-44E7-80C9-C6F76AACA50E}
+{6C978294-E378-4D10-84CC-34A783B777CF}
   9
 $VERSIONGUID
   2
-{C3F8DDC7-ABBD-49CD-AEBE-28514AF8125B}
+{4F92A893-9962-42A5-9D0E-F005B8B375FA}
   9
 $EXTNAMES
 290
@@ -1323,9 +1323,9 @@ ISM
   0
 CLASS
   1
-LAYOUT
+ACDBPLACEHOLDER
   2
-AcDbLayout
+AcDbPlaceHolder
   3
 ObjectDBX Classes
  90
@@ -1339,9 +1339,9 @@ ObjectDBX Classes
   0
 CLASS
   1
-ACDBPLACEHOLDER
+LAYOUT
   2
-AcDbPlaceHolder
+AcDbLayout
   3
 ObjectDBX Classes
  90
@@ -1701,7 +1701,7 @@ ACAD
   0
 APPID
   5
-5D
+6F
 330
 3
 100
@@ -1715,7 +1715,7 @@ HATCHBACKGROUNDCOLOR
   0
 APPID
   5
-5E
+70
 330
 3
 100
@@ -1955,7 +1955,7 @@ DIFFUSER_SUPPLY
   0
 BLOCK_RECORD
   5
-35
+37
 330
 9
 100
@@ -1975,7 +1975,7 @@ DIFFUSER_RETURN
   0
 BLOCK_RECORD
   5
-3A
+3E
 330
 9
 100
@@ -1995,7 +1995,7 @@ FCU
   0
 BLOCK_RECORD
   5
-3F
+45
 330
 9
 100
@@ -2015,7 +2015,7 @@ LIGHT_PANEL
   0
 BLOCK_RECORD
   5
-44
+4C
 330
 9
 100
@@ -2035,7 +2035,7 @@ LIGHT_DOWNLIGHT
   0
 BLOCK_RECORD
   5
-48
+52
 330
 9
 100
@@ -2055,7 +2055,7 @@ SOCKET
   0
 BLOCK_RECORD
   5
-4D
+59
 330
 9
 100
@@ -2075,7 +2075,7 @@ SWITCH
   0
 BLOCK_RECORD
   5
-52
+60
 330
 9
 100
@@ -2095,7 +2095,7 @@ SPRINKLER
   0
 BLOCK_RECORD
   5
-58
+68
 330
 9
 100
@@ -2303,6 +2303,66 @@ AcDbLine
  31
 0.0
   0
+ATTDEF
+  5
+35
+330
+2F
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+M-DIFF-S
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MA_HIEU
+ 70
+3
+  0
+ATTDEF
+  5
+36
+330
+2F
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+Miệng gió cấp (Supply Diffuser)
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MO_TA
+ 70
+3
+  0
 ENDBLK
   5
 31
@@ -2317,9 +2377,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-36
+38
 330
-35
+37
 100
 AcDbEntity
   8
@@ -2343,9 +2403,9 @@ DIFFUSER_RETURN
   0
 LWPOLYLINE
   5
-38
+3A
 330
-35
+37
 100
 AcDbEntity
   8
@@ -2375,9 +2435,9 @@ AcDbPolyline
   0
 LINE
   5
-39
+3B
 330
-35
+37
 100
 AcDbEntity
   8
@@ -2397,11 +2457,71 @@ AcDbLine
  31
 0.0
   0
+ATTDEF
+  5
+3C
+330
+37
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+M-DIFF-R
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MA_HIEU
+ 70
+3
+  0
+ATTDEF
+  5
+3D
+330
+37
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+Miệng gió hồi (Return Diffuser)
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MO_TA
+ 70
+3
+  0
 ENDBLK
   5
-37
+39
 330
-35
+37
 100
 AcDbEntity
   8
@@ -2411,9 +2531,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-3B
+3F
 330
-3A
+3E
 100
 AcDbEntity
   8
@@ -2437,9 +2557,9 @@ FCU
   0
 LWPOLYLINE
   5
-3D
+41
 330
-3A
+3E
 100
 AcDbEntity
   8
@@ -2469,9 +2589,9 @@ AcDbPolyline
   0
 TEXT
   5
-3E
+42
 330
-3A
+3E
 100
 AcDbEntity
   8
@@ -2497,11 +2617,71 @@ FCU
 100
 AcDbText
   0
+ATTDEF
+  5
+43
+330
+3E
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+M-FCU
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MA_HIEU
+ 70
+3
+  0
+ATTDEF
+  5
+44
+330
+3E
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+Dàn lạnh FCU (Fan Coil Unit)
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MO_TA
+ 70
+3
+  0
 ENDBLK
   5
-3C
+40
 330
-3A
+3E
 100
 AcDbEntity
   8
@@ -2511,9 +2691,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-40
+46
 330
-3F
+45
 100
 AcDbEntity
   8
@@ -2537,9 +2717,9 @@ LIGHT_PANEL
   0
 LWPOLYLINE
   5
-42
+48
 330
-3F
+45
 100
 AcDbEntity
   8
@@ -2569,9 +2749,9 @@ AcDbPolyline
   0
 TEXT
   5
-43
+49
 330
-3F
+45
 100
 AcDbEntity
   8
@@ -2597,11 +2777,71 @@ L
 100
 AcDbText
   0
+ATTDEF
+  5
+4A
+330
+45
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+E-LT-PANEL
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MA_HIEU
+ 70
+3
+  0
+ATTDEF
+  5
+4B
+330
+45
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+Đèn Panel/Downlight vuông
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MO_TA
+ 70
+3
+  0
 ENDBLK
   5
-41
+47
 330
-3F
+45
 100
 AcDbEntity
   8
@@ -2611,9 +2851,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-45
+4D
 330
-44
+4C
 100
 AcDbEntity
   8
@@ -2637,9 +2877,9 @@ LIGHT_DOWNLIGHT
   0
 CIRCLE
   5
-47
+4F
 330
-44
+4C
 100
 AcDbEntity
   8
@@ -2655,11 +2895,71 @@ AcDbCircle
  40
 100.0
   0
+ATTDEF
+  5
+50
+330
+4C
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+E-LT-DL
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MA_HIEU
+ 70
+3
+  0
+ATTDEF
+  5
+51
+330
+4C
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+Đèn Downlight âm trần
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MO_TA
+ 70
+3
+  0
 ENDBLK
   5
-46
+4E
 330
-44
+4C
 100
 AcDbEntity
   8
@@ -2669,9 +2969,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-49
+53
 330
-48
+52
 100
 AcDbEntity
   8
@@ -2695,9 +2995,9 @@ SOCKET
   0
 ARC
   5
-4B
+55
 330
-48
+52
 100
 AcDbEntity
   8
@@ -2721,9 +3021,9 @@ AcDbArc
   0
 LINE
   5
-4C
+56
 330
-48
+52
 100
 AcDbEntity
   8
@@ -2743,11 +3043,71 @@ AcDbLine
  31
 0.0
   0
+ATTDEF
+  5
+57
+330
+52
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+E-SOCKET
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MA_HIEU
+ 70
+3
+  0
+ATTDEF
+  5
+58
+330
+52
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+Ổ cắm điện
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MO_TA
+ 70
+3
+  0
 ENDBLK
   5
-4A
+54
 330
-48
+52
 100
 AcDbEntity
   8
@@ -2757,9 +3117,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-4E
+5A
 330
-4D
+59
 100
 AcDbEntity
   8
@@ -2783,9 +3143,9 @@ SWITCH
   0
 CIRCLE
   5
-50
+5C
 330
-4D
+59
 100
 AcDbEntity
   8
@@ -2803,9 +3163,9 @@ AcDbCircle
   0
 LINE
   5
-51
+5D
 330
-4D
+59
 100
 AcDbEntity
   8
@@ -2825,11 +3185,71 @@ AcDbLine
  31
 0.0
   0
+ATTDEF
+  5
+5E
+330
+59
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+E-SWITCH
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MA_HIEU
+ 70
+3
+  0
+ATTDEF
+  5
+5F
+330
+59
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+Công tắc đèn
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MO_TA
+ 70
+3
+  0
 ENDBLK
   5
-4F
+5B
 330
-4D
+59
 100
 AcDbEntity
   8
@@ -2839,9 +3259,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-53
+61
 330
-52
+60
 100
 AcDbEntity
   8
@@ -2865,9 +3285,9 @@ SPRINKLER
   0
 CIRCLE
   5
-55
+63
 330
-52
+60
 100
 AcDbEntity
   8
@@ -2885,9 +3305,9 @@ AcDbCircle
   0
 LINE
   5
-56
+64
 330
-52
+60
 100
 AcDbEntity
   8
@@ -2909,9 +3329,9 @@ AcDbLine
   0
 LINE
   5
-57
+65
 330
-52
+60
 100
 AcDbEntity
   8
@@ -2931,11 +3351,71 @@ AcDbLine
  31
 0.0
   0
+ATTDEF
+  5
+66
+330
+60
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+F-SPRK
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MA_HIEU
+ 70
+3
+  0
+ATTDEF
+  5
+67
+330
+60
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+Đầu phun Sprinkler chữa cháy
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MO_TA
+ 70
+3
+  0
 ENDBLK
   5
-54
+62
 330
-52
+60
 100
 AcDbEntity
   8
@@ -2945,9 +3425,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-59
+69
 330
-58
+68
 100
 AcDbEntity
   8
@@ -2971,9 +3451,9 @@ PUMP
   0
 CIRCLE
   5
-5B
+6B
 330
-58
+68
 100
 AcDbEntity
   8
@@ -2991,9 +3471,9 @@ AcDbCircle
   0
 LWPOLYLINE
   5
-5C
+6C
 330
-58
+68
 100
 AcDbEntity
   8
@@ -3017,11 +3497,71 @@ AcDbPolyline
  20
 200.0
   0
+ATTDEF
+  5
+6D
+330
+68
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+P-PUMP
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MA_HIEU
+ 70
+3
+  0
+ATTDEF
+  5
+6E
+330
+68
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+30.0
+  1
+Bơm (cấp nước/PCCC tùy hệ bố trí)
+100
+AcDbAttributeDefinition
+  3
+
+  2
+MO_TA
+ 70
+3
+  0
 ENDBLK
   5
-5A
+6A
 330
-58
+68
 100
 AcDbEntity
   8
@@ -4025,7 +4565,7 @@ CREATED_BY_EZDXF
   3
 WRITTEN_BY_EZDXF
 350
-5F
+71
   0
 DICTIONARYVAR
   5
@@ -4037,11 +4577,11 @@ DictionaryVariables
 280
 0
   1
-1.4.4 @ 2026-08-10T16:02:26.631372+00:00
+1.4.4 @ 2026-08-11T09:50:51.303388+00:00
   0
 DICTIONARYVAR
   5
-5F
+71
 330
 2D
 100
@@ -4049,7 +4589,7 @@ DictionaryVariables
 280
 0
   1
-1.4.4 @ 2026-08-10T16:02:26.632374+00:00
+1.4.4 @ 2026-08-11T09:50:51.307517+00:00
   0
 ENDSEC
   0

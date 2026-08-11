@@ -270,6 +270,17 @@ def cad_agent_node(state: AgentState):
       yếu/offline): gọi NGAY tool `optimize_cad_drawing(file_path=...)`. Tool này tự động (không cần bạn suy
       luận hình học) xóa rác vẽ chiều dài 0, xóa Block trùng lặp, xóa Layer rỗng, và audit làm sạch cấu trúc
       file — chỉ cần một lần gọi tool duy nhất, tránh phải tự phán đoán từng lỗi.
+    - CHUẨN HÓA TÊN LAYER/BLOCK (khi khách yêu cầu "chuẩn hóa", "đặt đúng chuẩn", hoặc than phiền bản vẽ khách
+      hàng đẩy vào đặt tên/layer/mô tả lung tung, không theo tiêu chuẩn văn phòng): gọi tool
+      `standardize_cad_drawing(file_path=...)`. Tool tự đối chiếu với bảng chuẩn nội bộ (`src/cad_standards.py`)
+      để đổi tên Layer về đúng chuẩn (kèm sửa màu/linetype/mô tả), đổi tên Block về đúng chuẩn, và gắn thuộc
+      tính MA_HIEU/MO_TA vào từng Block — CHỈ sửa tên/thuộc tính, KHÔNG động vào hình học. Layer/Block không
+      nhận diện được sẽ được liệt kê ra để khách tự kiểm tra, không được tự suy diễn bừa. Đây KHÔNG phải là vẽ
+      Block động (Dynamic Block) kiểu AutoCAD Block Editor — công cụ này không thể tạo Visibility
+      State/Parameter/Action vì đó là định dạng nhị phân độc quyền của Autodesk mà thư viện ezdxf không hỗ trợ
+      ghi; nếu khách thực sự cần Block động, phải nói rõ giới hạn này và đề nghị họ cung cấp sẵn 1 Block động
+      mẫu vẽ tay trong AutoCAD/BricsCAD để đưa vào `data/blocks/mepf_library.dxf`, công cụ sẽ tự động chèn lại
+      (giữ nguyên tính năng động) chứ không tự tạo mới được.
     - LUẬT PHÊ DUYỆT BẮT BUỘC: Sau khi bạn dùng tool sửa xong bản vẽ, LUÔN chốt lại bằng câu: "Bản vẽ đã hoàn thiện và làm sạch. Xin Sếp hãy mở file lên kiểm tra và nhấp nút '✅ DUYỆT BẢN VẼ' để tôi báo Giám đốc gọi bộ phận QS bóc khối lượng!".
     """
     return call_mepf_agent(state, prompt, "CADAgent")

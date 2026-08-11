@@ -17,7 +17,7 @@ Xây dựng bằng **LangGraph**, giao diện **Streamlit**, theo nguyên tắc
 | **Plumbing** | Cấp thoát nước, bể, bơm, nước nóng | `calc_water_pipe`, `calc_plumbing_pump_head` |
 | **Firefighting** | PCCC: **thủy lực sprinkler**, bơm chữa cháy (Q và H), **họng nước, kiểm soát khói, đầu báo cháy** | `calc_sprinkler_hydraulics`, `calc_fire_pump`, `calc_standpipe`, `calc_smoke_control`, `calc_fire_detector_qty` |
 | **QS** | Bóc khối lượng + **lập dự toán có giá trị tiền + BOQ mẫu Việt Nam** | `auto_quantity_takeoff`, `calc_boq_cost`, `export_boq_vietnam`, `lookup_unit_price` |
-| **CAD** | Đọc/sửa/tối ưu bản vẽ, phục hồi Block, render ảnh, **theo dõi revision** | `edit_cad`, `optimize_cad_drawing`, `snapshot_cad`, `diff_cad_revisions`, `restore_cad_revision` |
+| **CAD** | Đọc/sửa/tối ưu/**chuẩn hóa** bản vẽ, phục hồi Block, render ảnh, **theo dõi revision** | `edit_cad`, `optimize_cad_drawing`, `standardize_cad_drawing`, `snapshot_cad`, `diff_cad_revisions`, `restore_cad_revision` |
 | **BIM** | Mô hình 3D và **kiểm tra xung đột giữa các hệ** | `detect_clashes`, `auto_quantity_takeoff` |
 | **Reviewer** | Kỹ sư trưởng — kiểm duyệt, bắt làm lại nếu chưa đạt | (guardrail) |
 
@@ -47,6 +47,14 @@ Xây dựng bằng **LangGraph**, giao diện **Streamlit**, theo nguyên tắc
   `diff_cad_revisions` và `restore_cad_revision` để xem thay đổi và quay lui. Mặc định giữ
   **3 phiên bản gần nhất** cho mỗi bản vẽ (`MAX_CAD_REVISIONS`, đặt 0 để giữ tất cả) —
   mỗi phiên bản là một bản sao `.dxf` đầy đủ nên không giới hạn sẽ phình workspace.
+- 🧭 **Chuẩn hóa Layer/Block bản vẽ khách đẩy vào**: `standardize_cad_drawing` đối chiếu
+  với bảng tiêu chuẩn nội bộ (`src/cad_standards.py`) để tự đổi tên Layer (kèm sửa màu),
+  đổi tên Block, và gắn thuộc tính MA_HIEU/MO_TA — chỉ sửa đặt tên/thuộc tính, không đụng
+  hình học. Lưu ý: đây KHÔNG phải "Block động" (Dynamic Block) kiểu AutoCAD Block Editor —
+  Visibility State/Parameter/Action là định dạng nhị phân độc quyền của Autodesk mà thư
+  viện `ezdxf` không hỗ trợ ghi; muốn dùng Block động thật sự phải vẽ tay 1 lần trong
+  AutoCAD/BricsCAD rồi đưa vào `data/blocks/mepf_library.dxf`, hệ thống sẽ tự copy/chèn
+  lại (giữ nguyên tính năng động) chứ không tự tạo mới được.
 
 ## Cấu trúc thư mục
 

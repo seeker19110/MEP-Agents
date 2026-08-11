@@ -34,6 +34,11 @@ def test_cad_role_includes_execute_python_code_and_render():
     assert {"read_cad", "write_cad", "edit_cad", "render_cad_image", "execute_python_code"} <= names
 
 
+def test_cad_role_includes_standardize_cad_drawing():
+    names = {t.name for t in get_tools_for_role("cad")}
+    assert "standardize_cad_drawing" in names
+
+
 def test_qs_role_includes_write_excel_but_not_cad_editing():
     names = {t.name for t in get_tools_for_role("qs")}
     assert "write_excel" in names
