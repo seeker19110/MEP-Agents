@@ -65,6 +65,32 @@ def test_match_layer_recognizes_pipe_and_other_mepf_variants(raw_name, expected_
     assert cad_standards.match_layer(raw_name) == expected_canonical
 
 
+@pytest.mark.parametrize("raw_name, expected_canonical", [
+    ("may_lam_lanh_nuoc", "M-EQUIP-CHILLER"),
+    ("thap_giai_nhiet", "M-EQUIP-CTWR"),
+    ("quat_hut", "M-EQUIP-FAN"),
+    ("may_bien_ap", "E-EQUIP-TRANSFORMER"),
+    ("tu_bu_cong_suat", "E-EQUIP-CAPACITOR"),
+    ("ong_luon_dien", "E-CONDUIT"),
+    ("be_nuoc_ngam", "P-EQUIP-TANK"),
+    ("binh_nong_lanh", "P-EQUIP-WH"),
+    ("tram_xu_ly_nuoc_thai", "P-EQUIP-STP"),
+    ("bom_chua_chay", "F-EQUIP-PUMP"),
+    ("be_nuoc_chua_chay", "F-EQUIP-TANK"),
+    ("van_dieu_khien", "F-EQUIP-VALVE"),
+])
+def test_match_layer_recognizes_equipment_variants_across_all_4_systems(raw_name, expected_canonical):
+    assert cad_standards.match_layer(raw_name) == expected_canonical
+
+
+def test_every_layer_standard_entry_has_discipline_prefix_matching_its_declared_discipline():
+    prefix_by_discipline = {"Mechanical": "M-", "Electrical": "E-", "Plumbing": "P-",
+                             "Firefighting": "F-", "General": "G-"}
+    for key, meta in cad_standards.LAYER_STANDARD.items():
+        expected_prefix = prefix_by_discipline[meta["discipline"]]
+        assert key.startswith(expected_prefix), f"{key} không đúng tiền tố hệ {meta['discipline']}"
+
+
 def test_match_block_recognizes_common_variants():
     assert cad_standards.match_block("O_Cam_Dien") == "SOCKET"
     assert cad_standards.match_block("mieng_gio_cap") == "DIFFUSER_SUPPLY"

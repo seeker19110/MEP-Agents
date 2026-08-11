@@ -11,6 +11,13 @@ trong bản vẽ người dùng đẩy vào, dùng để tự nhận diện & đ
 block khớp keyword cụ thể mới được TỰ ĐỘNG đổi tên; layer/block không khớp được
 liệt kê để người dùng tự kiểm tra thay vì đoán bừa.
 
+QUY ƯỚC ĐẶT TÊN (cấu trúc `<HỆ>-<NHÓM>[-<PHÂN LOẠI>]`):
+- `M-` Mechanical (Cơ/Điều hòa thông gió), `E-` Electrical (Điện), `P-` Plumbing (Cấp
+  thoát nước), `F-` Firefighting (PCCC), `G-` General (chung, không thuộc riêng hệ nào).
+- Nhóm thứ 2 nói rõ loại đối tượng: ống gió/ống nước thì ghi tắt hệ thống cụ thể (SAD,
+  RAD, CHWS...); thiết bị dùng `EQUIP-<LOẠI>` (VD `M-EQUIP-AHU`, `F-EQUIP-PUMP`); nhóm
+  không có thiết bị/ống rõ ràng (đèn, ổ cắm, báo cháy...) đặt tên mô tả ngắn gọn.
+
 Quy ước màu tổng quát để nhìn Layer là đoán ngay được vai trò (áp dụng xuyên suốt
 cả 4 hệ, không chỉ riêng 1 hệ):
 - "Cấp" (nguồn/gió/nước lạnh đi vào không gian) -> Xanh dương (5)
@@ -18,6 +25,9 @@ cả 4 hệ, không chỉ riêng 1 hệ):
 - Nóng (nước nóng, sưởi) -> Đỏ (1) — quy ước "nóng = đỏ, lạnh = xanh" kinh điển
 - Liên quan an toàn cháy nổ/thoát hiểm (PCCC, tăng áp, hút khói, đèn sự cố)
   -> luôn thuộc dải màu đỏ/cam để nổi bật, kể cả khi Layer đó do hệ M hay E vẽ
+- Thiết bị chính (`*-EQUIP-*`) của cả 3 hệ M/P/F dùng chung màu xám trung tính (9) —
+  các hệ đã có màu ý nghĩa riêng cho đường ống/dây, thiết bị chỉ cần nổi khối, không
+  cần thêm 1 lớp mã màu riêng cho từng loại máy.
 """
 import unicodedata
 
@@ -51,8 +61,23 @@ LAYER_STANDARD = {
     "M-PIPE-CHWR": {"color": 4, "discipline": "Mechanical",
                      "description": "Ống hồi nước lạnh Chiller (Chilled Water Return)",
                      "keywords": ["CHWR", "ONGHOINUOCLANH", "CHILLEDWATERRETURN", "ONGHOICHILLER"]},
-    "M-EQUIP": {"color": 9, "discipline": "Mechanical", "description": "Thiết bị Cơ (FCU/AHU/Chiller)",
-                "keywords": ["THIETBICO", "THIETBIDIEUHOA", "AHU", "CHILLER", "MECHEQUIP"]},
+    # Thiết bị (Equipment) — tách theo từng loại máy chính thay vì gộp chung 1 layer.
+    "M-EQUIP-AHU": {"color": 9, "discipline": "Mechanical", "description": "Bộ xử lý không khí (Air Handling Unit)",
+                     "keywords": ["AHU", "AIRHANDLINGUNIT", "BOXULYKHONGKHI"]},
+    "M-EQUIP-FCU": {"color": 9, "discipline": "Mechanical", "description": "Dàn lạnh (Fan Coil Unit)",
+                     "keywords": ["FCU", "FANCOILUNIT", "DANLANHFCU"]},
+    "M-EQUIP-VRV": {"color": 9, "discipline": "Mechanical", "description": "Dàn nóng/dàn lạnh VRV-VRF",
+                     "keywords": ["VRV", "VRF", "DANNONGVRV", "DANLANHVRV"]},
+    "M-EQUIP-CHILLER": {"color": 9, "discipline": "Mechanical", "description": "Máy làm lạnh nước (Chiller)",
+                         "keywords": ["CHILLER", "MAYLAMLANHNUOC"]},
+    "M-EQUIP-CTWR": {"color": 9, "discipline": "Mechanical", "description": "Tháp giải nhiệt (Cooling Tower)",
+                      "keywords": ["COOLINGTOWER", "THAPGIAINHIET"]},
+    "M-EQUIP-PUMP": {"color": 9, "discipline": "Mechanical",
+                      "description": "Bơm nước lạnh/giải nhiệt (Chilled/Condenser Water Pump)",
+                      "keywords": ["BOMNUOCLANH", "BOMGIAINHIET", "CHILLEDWATERPUMP", "CONDENSERWATERPUMP"]},
+    "M-EQUIP-FAN": {"color": 9, "discipline": "Mechanical",
+                     "description": "Quạt thông gió/hút/tăng áp (Ventilation/Exhaust/Pressurization Fan)",
+                     "keywords": ["QUATTHONGGIO", "QUATHUT", "QUATTANGAP", "VENTILATIONFAN", "EXHAUSTFAN"]},
 
     # ---------------------------------------------------------------- ELECTRICAL
     "E-LIGHT": {"color": 2, "discipline": "Electrical", "description": "Đèn chiếu sáng thường",
@@ -81,6 +106,13 @@ LAYER_STANDARD = {
                     "keywords": ["CAMERA", "CCTV", "ANNINH"]},
     "E-ELV-ACCESS": {"color": 142, "discipline": "Electrical", "description": "Kiểm soát vào ra (Access Control)",
                       "keywords": ["KIEMSOATVAORA", "ACCESSCONTROL", "THEDIEUTU"]},
+    "E-CONDUIT": {"color": 24, "discipline": "Electrical", "description": "Ống luồn dây điện ngầm (Conduit)",
+                   "keywords": ["ONGLUONDIEN", "CONDUIT", "ONGDIENNGAM"]},
+    "E-EQUIP-TRANSFORMER": {"color": 9, "discipline": "Electrical", "description": "Máy biến áp (Transformer)",
+                             "keywords": ["MAYBIENAP", "TRANSFORMER", "TRAMBIENAP"]},
+    "E-EQUIP-CAPACITOR": {"color": 9, "discipline": "Electrical",
+                           "description": "Tủ bù công suất (Capacitor Bank)",
+                           "keywords": ["TUBUCONGSUAT", "CAPACITORBANK", "TUBU"]},
 
     # ---------------------------------------------------------------- PLUMBING (Cấp thoát nước)
     "P-PIPE-CAP": {"color": 5, "discipline": "Plumbing", "description": "Ống cấp nước sinh hoạt (Cold Water Supply)",
@@ -99,8 +131,18 @@ LAYER_STANDARD = {
     "P-PIPE-RAIN": {"color": 140, "discipline": "Plumbing",
                      "description": "Ống thoát nước mưa (Rainwater / Storm Drainage)",
                      "keywords": ["ONGTHOATNUOCMUA", "RAINWATER", "STORMDRAIN", "NUOCMUA"]},
-    "P-EQUIP": {"color": 84, "discipline": "Plumbing", "description": "Thiết bị Cấp thoát nước (Bơm/Bể)",
-                "keywords": ["THIETBICAPTHOAT", "BENUOC", "MAYBOMNUOC", "PLUMBEQUIP"]},
+    "P-EQUIP-PUMP": {"color": 9, "discipline": "Plumbing",
+                      "description": "Bơm cấp nước/bơm tăng áp (Water Supply/Booster Pump)",
+                      "keywords": ["BOMCAPNUOC", "BOMTANGAP", "BOOSTERPUMP", "MAYBOMNUOC"]},
+    "P-EQUIP-TANK": {"color": 9, "discipline": "Plumbing",
+                      "description": "Bể nước ngầm/bể mái/bồn áp lực (Water Tank/Pressure Vessel)",
+                      "keywords": ["BENUOCNGAM", "BENUOCMAI", "BONAPLUC", "WATERTANK", "PRESSUREVESSEL"]},
+    "P-EQUIP-WH": {"color": 9, "discipline": "Plumbing",
+                    "description": "Bình nóng lạnh/máy nước nóng (Water Heater)",
+                    "keywords": ["BINHNONGLANH", "MAYNUOCNONG", "WATERHEATER"]},
+    "P-EQUIP-STP": {"color": 9, "discipline": "Plumbing",
+                     "description": "Trạm xử lý nước thải/bể tự hoại (STP/Septic Tank)",
+                     "keywords": ["TRAMXULYNUOCTHAI", "BETUHOAI", "SEPTICTANK", "STP"]},
 
     # ---------------------------------------------------------------- FIREFIGHTING (PCCC)
     "F-SPRINKLER": {"color": 1, "discipline": "Firefighting", "description": "Đầu phun Sprinkler",
@@ -110,9 +152,14 @@ LAYER_STANDARD = {
     "F-PIPE-HYD": {"color": 10, "discipline": "Firefighting",
                     "description": "Ống họng nước vách tường / trụ cứu hỏa (Standpipe / Hydrant)",
                     "keywords": ["ONGHONGNUOC", "STANDPIPE", "HYDRANTPIPE", "ONGTRUCUUHOA", "HONGNUOCVACHTUONG"]},
-    "F-EQUIP": {"color": 9, "discipline": "Firefighting",
-                "description": "Thiết bị PCCC (Bơm chữa cháy/Bình chữa cháy)",
-                "keywords": ["THIETBIPCCC", "BOMCHUACHAY", "FIREPUMP", "FIREEQUIP"]},
+    "F-EQUIP-PUMP": {"color": 9, "discipline": "Firefighting",
+                      "description": "Bơm chữa cháy (Jockey/Điện/Diesel)",
+                      "keywords": ["BOMCHUACHAY", "FIREPUMP", "JOCKEYPUMP", "DIESELPUMP"]},
+    "F-EQUIP-TANK": {"color": 9, "discipline": "Firefighting", "description": "Bể nước chữa cháy (Fire Water Tank)",
+                      "keywords": ["BENUOCCHUACHAY", "FIREWATERTANK"]},
+    "F-EQUIP-VALVE": {"color": 9, "discipline": "Firefighting",
+                       "description": "Van điều khiển hệ thống (Alarm Check Valve/Zone Control Valve)",
+                       "keywords": ["VANDIEUKHIEN", "ALARMCHECKVALVE", "ZONECONTROLVALVE", "VANBAODONG"]},
     "F-DETECT": {"color": 200, "discipline": "Firefighting", "description": "Đầu báo cháy",
                  "keywords": ["DAUBAOCHAY", "SMOKEDETECTOR", "FIREDETECTOR", "BAOCHAY"]},
     "F-ALARM-DEVICE": {"color": 201, "discipline": "Firefighting",
@@ -144,7 +191,7 @@ BLOCK_STANDARD = {
     "DIFFUSER_RETURN": {"discipline": "Mechanical", "ma_hieu": "M-DIFF-R", "default_layer": "M-RAD",
                          "description": "Miệng gió hồi (Return Diffuser)",
                          "keywords": ["MIENGGIOHOI", "RETURNDIFFUSER", "DIFFUSERHOI", "GIOHOIRA"]},
-    "FCU": {"discipline": "Mechanical", "ma_hieu": "M-FCU", "default_layer": "M-EQUIP",
+    "FCU": {"discipline": "Mechanical", "ma_hieu": "M-FCU", "default_layer": "M-EQUIP-FCU",
             "description": "Dàn lạnh FCU (Fan Coil Unit)",
             "keywords": ["FANCOILUNIT", "DANLANH"]},
     "LIGHT_PANEL": {"discipline": "Electrical", "ma_hieu": "E-LT-PANEL", "default_layer": "E-LIGHT",
@@ -162,9 +209,9 @@ BLOCK_STANDARD = {
     "SPRINKLER": {"discipline": "Firefighting", "ma_hieu": "F-SPRK", "default_layer": "F-SPRINKLER",
                   "description": "Đầu phun Sprinkler chữa cháy",
                   "keywords": ["DAUPHUNSPRINKLER", "SPRINKLERHEAD"]},
-    "PUMP": {"discipline": "Plumbing", "ma_hieu": "P-PUMP", "default_layer": "P-EQUIP",
+    "PUMP": {"discipline": "Plumbing", "ma_hieu": "P-PUMP", "default_layer": "P-EQUIP-PUMP",
              "description": "Bơm (cấp nước/PCCC tùy hệ bố trí)",
-             "keywords": ["MAYBOMNUOC", "WATERPUMP", "MAYBOM"]},
+             "keywords": ["WATERPUMP", "MAYBOM"]},
 }
 
 
