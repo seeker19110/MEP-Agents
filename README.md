@@ -43,3 +43,8 @@ LANGCHAIN_API_KEY=ls__xxxxxx
 LANGCHAIN_PROJECT=x_agents_project
 ```
 Khi chạy dự án, toàn bộ "suy nghĩ", thời gian thực thi, và lỗi của từng tác nhân sẽ được vẽ biểu đồ trực quan trên web LangSmith.
+
+## Deploy
+
+Xem hướng dẫn deploy chi tiết (Docker, docker-compose kèm Ollama, systemd VPS, hoặc
+Streamlit Community Cloud) tại [`docs/DEPLOY.md`](docs/DEPLOY.md).
