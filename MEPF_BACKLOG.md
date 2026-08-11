@@ -36,15 +36,31 @@ Ghi lại các đề xuất tối ưu đã thảo luận nhưng **chưa** đưa 
   giá) — gap lớn nhất: hiện QS chỉ đếm khối lượng, chưa phải "dự toán" đúng nghĩa.
 - [ ] **Xuất BOQ theo mẫu chuẩn Việt Nam** (định dạng bảng tổng hợp khối lượng quen
   thuộc với hồ sơ thầu).
+- [x] ~~Bóc khối lượng bằng 1 tool duy nhất, thuần toán học (không phụ thuộc LLM tự đếm
+  /soạn JSON)~~ — đã làm: `src/tools.py` → `auto_quantity_takeoff` (đọc CAD, đếm Block,
+  cộng chiều dài theo Layer, liên kết ghi chú không gian, ghi Excel — 1 lần gọi). Mục
+  tiêu: để model AI yếu/chạy offline (Ollama) vẫn bóc khối lượng đúng, vì gánh nặng suy
+  luận đã chuyển hết sang code Python xác định (deterministic), LLM chỉ cần gọi đúng tool.
 
 ## BIM
 - [ ] **Clash detection** — kiểm tra xung đột hình học giữa các hệ thống (ống, gió,
   cáp...) trong file CAD/DXF. Prompt của `bim_agent_node` đã nói "kiểm tra xung đột"
   nhưng chưa có tool thực hiện việc này.
 
+## Tối ưu bản vẽ CAD
+- [x] ~~Tool tối ưu/dọn dẹp bản vẽ tự động, thuần hình học (không cần LLM suy luận)~~ —
+  đã làm: `src/tools.py` → `optimize_cad_drawing` (audit, xóa rác vẽ chiều dài 0, xóa
+  Block trùng lặp cùng tên+vị trí, xóa Layer rỗng). Gọi được bởi CAD/BIM Agent chỉ bằng
+  1 lần gọi tool, phù hợp model AI yếu/offline.
+
 ## Khác (cross-cutting)
 - [ ] Mở rộng CSDL tiêu chuẩn cho RAG — hiện `data/standards/` chỉ có 2 file mẫu
   (`ashrae_hvac.txt`, `tcvn_mau.txt`), tra cứu tiêu chuẩn còn rất mỏng.
+- [x] ~~Cho phép `search_standards` hoạt động khi KHÔNG có `OPENAI_API_KEY` (offline hoàn
+  toàn)~~ — đã làm: `src/tools.py` → `_offline_keyword_search` tự động được dùng làm
+  fallback (so khớp từ khóa Jaccard trên toàn bộ `data/standards/*.txt`, không cần
+  internet/API key nào) khi chưa cấu hình OpenAI hoặc chưa `ingest` FAISS. Xem
+  `AI_MODEL_SETUP.md` mục "Chế độ Offline hoàn toàn".
 - [ ] Theo dõi phiên bản/revision bản vẽ CAD giữa các lần chỉnh sửa.
 - [x] ~~Tách tool schema theo từng vai trò để giảm token mỗi lượt gọi LLM~~ — đã làm
   (`src/tools.py` → `TOOLS_BY_ROLE`/`get_tools_for_role`), xem `AI_MODEL_SETUP.md` §6.

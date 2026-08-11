@@ -47,24 +47,116 @@ def _load_vectorstore(api_key: str, index_path: str):
     embeddings = OpenAIEmbeddings(api_key=api_key)
     return FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
 
+
+_STOPWORDS_VI_EN = {
+    "va", "la", "cua", "cho", "theo", "tai", "trong", "voi", "khi", "de", "the",
+    "and", "or", "of", "the", "for", "to", "in", "a", "an", "is", "are", "how",
+    "what", "bao", "nhieu", "nao", "duoc", "co", "khong", "nhu", "mot",
+}
+
+
+def _strip_accents(text: str) -> str:
+    """Bỏ dấu tiếng Việt bằng ánh xạ ASCII đơn giản (không cần thư viện ngoài) để so
+    khớp từ khóa không phân biệt dấu — hữu ích khi người dùng gõ không dấu."""
+    mapping = str.maketrans(
+        "àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ"
+        "ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ",
+        "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd"
+        "AAAAAAAAAAAAAAAAAEEEEEEEEEEEIIIIIOOOOOOOOOOOOOOOOOUUUUUUUUUUUYYYYYD",
+    )
+    return text.translate(mapping)
+
+
+def _tokenize(text: str) -> set:
+    normalized = _strip_accents(text.lower())
+    words = re.findall(r"[a-z0-9]+", normalized)
+    return {w for w in words if w not in _STOPWORDS_VI_EN and len(w) > 1}
+
+
+@lru_cache(maxsize=1)
+def _load_offline_corpus(standards_dir: str) -> tuple:
+    """Nạp toàn bộ file .txt trong data/standards/ thành các đoạn (chunk) văn bản, không
+    cần embedding/API — dùng cho tra cứu offline hoàn toàn (không cần OPENAI_API_KEY)."""
+    chunks = []
+    if not os.path.isdir(standards_dir):
+        return tuple(chunks)
+    for fname in sorted(os.listdir(standards_dir)):
+        if not fname.lower().endswith(".txt"):
+            continue
+        fpath = os.path.join(standards_dir, fname)
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            continue
+        # Chia theo đoạn trống (paragraph) để giữ ngữ cảnh liền mạch, bỏ đoạn quá ngắn.
+        for para in re.split(r"\n\s*\n", content):
+            para = para.strip()
+            if len(para) >= 20:
+                chunks.append((fname, para))
+    return tuple(chunks)
+
+
+def _offline_keyword_search(query: str, standards_dir: str = "data/standards", k: int = 3) -> str:
+    """Tra cứu tiêu chuẩn không cần internet/API key: so khớp từ khóa (Jaccard) trên toàn
+    bộ đoạn văn bản trong data/standards/. Không mạnh bằng vector search ngữ nghĩa nhưng
+    hoạt động 100% offline — đúng mục tiêu hỗ trợ model AI yếu/máy chạy Ollama cục bộ."""
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        return "Câu truy vấn rỗng hoặc không có từ khóa hợp lệ để tra cứu."
+
+    chunks = _load_offline_corpus(standards_dir)
+    if not chunks:
+        return (
+            "Không tìm thấy tài liệu tiêu chuẩn nào trong 'data/standards/' để tra cứu offline. "
+            "Vui lòng thêm file .txt vào thư mục này."
+        )
+
+    scored = []
+    for fname, para in chunks:
+        para_tokens = _tokenize(para)
+        if not para_tokens:
+            continue
+        overlap = len(query_tokens & para_tokens)
+        if overlap == 0:
+            continue
+        score = overlap / len(query_tokens | para_tokens)
+        scored.append((score, fname, para))
+
+    if not scored:
+        return f"Không tìm thấy thông tin tiêu chuẩn nào khớp với '{query}' (tra cứu offline theo từ khóa)."
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = scored[:k]
+
+    result = f"Kết quả tra cứu tiêu chuẩn OFFLINE (theo từ khóa, không cần API) cho '{query}':\n"
+    for i, (score, fname, para) in enumerate(top, 1):
+        result += f"\n--- Trích đoạn {i} (Nguồn: {fname}, độ khớp: {score:.2f}) ---\n{para}\n"
+    return result
+
+
 @tool
 def search_standards(query: str) -> str:
-    """Tra cứu Tiêu chuẩn thiết kế MEPF (TCVN, ASHRAE, NFPA...) từ cơ sở dữ liệu nội bộ."""
+    """Tra cứu Tiêu chuẩn thiết kế MEPF (TCVN, ASHRAE, NFPA...) từ cơ sở dữ liệu nội bộ.
+    Tự động dùng FAISS + OpenAI Embeddings nếu đã cấu hình OPENAI_API_KEY và đã 'ingest',
+    ngược lại tự động rơi về tra cứu offline theo từ khóa (không cần internet/API key) —
+    để tính năng tra cứu tiêu chuẩn vẫn hoạt động khi chạy hoàn toàn offline (VD: Ollama)."""
     logger.info("Tra cứu tiêu chuẩn thực: %s", query)
     try:
         from src.config import settings
 
-        api_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "dummy_key_to_prevent_crash_on_import")
-
+        api_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
         index_path = "faiss_index"
-        if not os.path.exists(index_path):
-            return "Hệ thống RAG chưa được khởi tạo. Vui lòng thêm tài liệu vào 'data/standards/' và chạy 'uv run python src/ingest.py'."
+        has_real_key = bool(api_key) and api_key != "dummy_key_to_prevent_crash_on_import"
+
+        if not has_real_key or not os.path.exists(index_path):
+            return _offline_keyword_search(query)
 
         vectorstore = _load_vectorstore(api_key, index_path)
         docs = vectorstore.similarity_search(query, k=3)
 
         if not docs:
-            return "Không tìm thấy thông tin tiêu chuẩn nào khớp với yêu cầu."
+            return _offline_keyword_search(query)
 
         result = f"Kết quả RAG Tiêu chuẩn cho '{query}':\n"
         for i, doc in enumerate(docs, 1):
@@ -74,7 +166,11 @@ def search_standards(query: str) -> str:
 
         return result
     except Exception as e:
-        return f"Lỗi tra cứu tiêu chuẩn RAG: {e}"
+        logger.warning("Lỗi tra cứu RAG, chuyển sang offline: %s", e)
+        try:
+            return _offline_keyword_search(query)
+        except Exception as e2:
+            return f"Lỗi tra cứu tiêu chuẩn: {e2}"
 
 @tool
 def search_web(query: str) -> str:
@@ -676,6 +772,237 @@ def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) ->
     except Exception as e:
         return f"Lỗi phân tích ngữ cảnh không gian CAD: {e}"
 
+@tool
+def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_toan.xlsx", max_distance: float = 2000.0) -> str:
+    """Bóc tách khối lượng TỰ ĐỘNG & TOÀN DIỆN từ file CAD (.dxf) và xuất thẳng ra Excel
+    CHỈ BẰNG MỘT LẦN GỌI TOOL DUY NHẤT — không cần LLM tự đếm block, tự cộng chiều dài
+    hay tự soạn JSON (những bước dễ sai với model AI yếu/model chạy offline qua Ollama).
+    Quy trình bên trong (thuần toán học/hình học, KHÔNG dùng LLM):
+    1. Audit làm sạch file CAD.
+    2. Đếm số lượng từng loại Block (thiết bị) theo tên + thuộc tính (attributes).
+    3. Cộng dồn tổng chiều dài từng tuyến ống/dây theo Layer.
+    4. Liên kết Ghi chú văn bản (TEXT/MTEXT, ví dụ 'Ống uPVC Ø110') với Layer ống gần nhất
+       (Spatial Matching) để đặt tên hạng mục đúng theo bản vẽ thay vì chỉ ghi tên Layer thô.
+    5. Ghi toàn bộ kết quả (STT, Hạng mục, Đơn vị, Khối lượng, Ghi chú) ra file Excel thật.
+    Dùng tool này làm bước ĐẦU TIÊN VÀ DUY NHẤT khi cần bóc khối lượng/lập dự toán từ CAD;
+    chỉ cần dùng `read_cad`/`analyze_cad_spatial_context` riêng lẻ khi cần phân tích sâu hơn.
+    """
+    logger.info("Auto Quantity Takeoff (offline, deterministic): %s -> %s", file_path, output_excel_path)
+    try:
+        safe_path = resolve_safe_path(file_path)
+        doc = ezdxf.readfile(safe_path)
+
+        auditor = audit.Auditor(doc)
+        auditor.run()
+        audit_fixes = len(auditor.fixes)
+
+        msp = doc.modelspace()
+
+        block_counts = {}  # (name, attrib_str) -> count
+        layer_lengths = {}  # layer -> total length (m, theo đơn vị bản vẽ)
+        texts = []
+        pipe_segments = []
+
+        def _seg_dist(px, py, ax, ay, bx, by):
+            l2 = (bx - ax) ** 2 + (by - ay) ** 2
+            if l2 == 0:
+                return math.hypot(px - ax, py - ay)
+            t = max(0.0, min(1.0, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / l2))
+            return math.hypot(px - (ax + t * (bx - ax)), py - (ay + t * (by - ay)))
+
+        for entity in msp:
+            layer = entity.dxf.layer
+            dxftype = entity.dxftype()
+
+            if dxftype == 'INSERT':
+                b_name = entity.dxf.name
+                attribs = {}
+                if hasattr(entity, 'attribs') and entity.attribs:
+                    for attrib in entity.attribs:
+                        if hasattr(attrib, 'dxf') and hasattr(attrib.dxf, 'tag'):
+                            attribs[attrib.dxf.tag] = getattr(attrib.dxf, 'text', '')
+                attr_str = json.dumps(attribs, ensure_ascii=False) if attribs else ""
+                key = (b_name, attr_str)
+                block_counts[key] = block_counts.get(key, 0) + 1
+                continue
+
+            if dxftype in ('TEXT', 'MTEXT'):
+                raw = entity.dxf.text if dxftype == 'TEXT' else entity.text
+                t_str = normalize_mepf_parameter_spec((raw or '').strip())
+                pos = entity.dxf.insert
+                if t_str:
+                    texts.append({"text": t_str, "pos": (pos.x, pos.y)})
+                continue
+
+            if dxftype == 'LINE':
+                start, end = entity.dxf.start, entity.dxf.end
+                dist = math.hypot(end.x - start.x, end.y - start.y)
+                layer_lengths[layer] = layer_lengths.get(layer, 0.0) + dist
+                pipe_segments.append({"layer": layer, "seg": (start.x, start.y, end.x, end.y)})
+            elif dxftype in ('LWPOLYLINE', 'POLYLINE'):
+                try:
+                    if dxftype == 'LWPOLYLINE':
+                        pts = entity.get_points(format='xy')
+                    else:
+                        pts = [(v.dxf.location.x, v.dxf.location.y) for v in entity.vertices]
+                    dist = 0.0
+                    for i in range(1, len(pts)):
+                        ax, ay = pts[i - 1][0], pts[i - 1][1]
+                        bx, by = pts[i][0], pts[i][1]
+                        seg_len = math.hypot(bx - ax, by - ay)
+                        dist += seg_len
+                        pipe_segments.append({"layer": layer, "seg": (ax, ay, bx, by)})
+                    layer_lengths[layer] = layer_lengths.get(layer, 0.0) + dist
+                except Exception:
+                    pass
+
+        # Liên kết ghi chú <-> layer ống gần nhất, để đặt tên hạng mục theo đúng ghi chú
+        # trên bản vẽ (ví dụ 'Ống uPVC Ø110') thay vì chỉ hiển thị tên Layer kỹ thuật.
+        layer_labels = {}  # layer -> {label: count of matching texts}
+        for t in texts:
+            tx, ty = t["pos"]
+            min_dist, best_layer = float('inf'), None
+            for p in pipe_segments:
+                ax, ay, bx, by = p["seg"]
+                d = _seg_dist(tx, ty, ax, ay, bx, by)
+                if d < min_dist:
+                    min_dist, best_layer = d, p["layer"]
+            if best_layer is not None and min_dist <= max_distance:
+                bucket = layer_labels.setdefault(best_layer, {})
+                bucket[t["text"]] = bucket.get(t["text"], 0) + 1
+
+        rows = []
+        stt = 1
+        for (b_name, attr_str), count in sorted(block_counts.items(), key=lambda x: -x[1]):
+            ghi_chu = attr_str if attr_str else ""
+            rows.append({"STT": stt, "Hạng mục": b_name, "Đơn vị": "Bộ", "Khối lượng": count, "Ghi chú": ghi_chu})
+            stt += 1
+
+        for layer, length in sorted(layer_lengths.items(), key=lambda x: -x[1]):
+            if length <= 0:
+                continue
+            label = layer
+            note = f"Layer: {layer}"
+            if layer in layer_labels:
+                best_label = max(layer_labels[layer].items(), key=lambda x: x[1])[0]
+                label = best_label
+                note = f"Layer: {layer}"
+            rows.append({"STT": stt, "Hạng mục": label, "Đơn vị": "m", "Khối lượng": round(length, 2), "Ghi chú": note})
+            stt += 1
+
+        if not rows:
+            return "Không tìm thấy Block hoặc tuyến ống/dây nào trong bản vẽ để bóc khối lượng."
+
+        out_path = output_excel_path if output_excel_path.endswith('.xlsx') else output_excel_path + '.xlsx'
+        out_safe_path = resolve_safe_path(out_path)
+        dir_name = os.path.dirname(out_safe_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+
+        df = pd.DataFrame(rows)
+        df.to_excel(out_safe_path, index=False)
+
+        summary = (
+            f"BÓC TÁCH KHỐI LƯỢNG TỰ ĐỘNG THÀNH CÔNG (offline, không cần LLM tính toán).\n"
+            f"- Đã làm sạch bản vẽ (Audit sửa {audit_fixes} lỗi).\n"
+            f"- Tổng {len(block_counts)} loại Block (thiết bị) và {len([l for l, v in layer_lengths.items() if v > 0])} tuyến ống/dây có khối lượng.\n"
+            f"- Đã ghi {len(rows)} dòng dự toán ra file Excel tại: {out_path}\n"
+        )
+        preview_rows = rows[:15]
+        summary += "\nXem trước:\n"
+        for r in preview_rows:
+            summary += f"  {r['STT']}. {r['Hạng mục']} — {r['Khối lượng']} {r['Đơn vị']}\n"
+        if len(rows) > 15:
+            summary += f"  ... và {len(rows) - 15} dòng khác trong file Excel.\n"
+        return summary
+    except Exception as e:
+        return f"Lỗi bóc tách khối lượng tự động: {e}"
+
+
+@tool
+def optimize_cad_drawing(file_path: str, output_path: str = "", dedupe_tolerance: float = 1.0) -> str:
+    """Tối ưu & dọn dẹp bản vẽ CAD (.dxf) TỰ ĐỘNG, thuần hình học (KHÔNG dùng LLM) — phù
+    hợp chạy offline hoặc với model AI yếu vì không cần suy luận, chỉ cần gọi 1 tool:
+    1. Audit sửa lỗi cấu trúc file.
+    2. Xóa các đoạn LINE/POLYLINE có chiều dài = 0 (rác vẽ thừa).
+    3. Xóa các Block instance (INSERT) bị trùng lặp hoàn toàn (cùng tên Block, cùng vị trí
+       trong phạm vi dedupe_tolerance) — lỗi thường gặp khi copy/paste nhầm trong CAD.
+    4. Xóa các Layer rỗng (không còn entity nào tham chiếu) ngoại trừ layer '0'/'Defpoints'.
+    Nếu output_path bỏ trống, ghi đè lên chính file_path.
+    """
+    logger.info("Optimize CAD Drawing (offline, deterministic): %s", file_path)
+    try:
+        safe_path = resolve_safe_path(file_path)
+        doc = ezdxf.readfile(safe_path)
+        msp = doc.modelspace()
+
+        auditor = audit.Auditor(doc)
+        auditor.run()
+        audit_fixes = len(auditor.fixes)
+
+        removed_zero_len = 0
+        removed_dupe_blocks = 0
+
+        for entity in list(msp.query('LINE')):
+            start, end = entity.dxf.start, entity.dxf.end
+            if math.hypot(end.x - start.x, end.y - start.y) < 1e-6:
+                msp.delete_entity(entity)
+                removed_zero_len += 1
+
+        for entity in list(msp.query('LWPOLYLINE')):
+            try:
+                pts = entity.get_points(format='xy')
+                total = sum(math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) for i in range(1, len(pts)))
+                if total < 1e-6:
+                    msp.delete_entity(entity)
+                    removed_zero_len += 1
+            except Exception:
+                pass
+
+        seen_inserts = set()
+        for entity in list(msp.query('INSERT')):
+            ins = entity.dxf.insert
+            key = (
+                entity.dxf.name,
+                entity.dxf.layer,
+                round(ins.x / dedupe_tolerance) if dedupe_tolerance > 0 else ins.x,
+                round(ins.y / dedupe_tolerance) if dedupe_tolerance > 0 else ins.y,
+            )
+            if key in seen_inserts:
+                msp.delete_entity(entity)
+                removed_dupe_blocks += 1
+            else:
+                seen_inserts.add(key)
+
+        used_layers = {entity.dxf.layer for entity in msp}
+        removed_layers = []
+        for layer in list(doc.layers):
+            lname = layer.dxf.name
+            if lname in ('0', 'Defpoints') or lname in used_layers:
+                continue
+            try:
+                doc.layers.remove(lname)
+                removed_layers.append(lname)
+            except Exception:
+                pass
+
+        target_path = output_path.strip() or file_path
+        out_safe_path = resolve_safe_path(target_path)
+        doc.saveas(out_safe_path)
+
+        return (
+            f"TỐI ƯU BẢN VẼ THÀNH CÔNG (offline, không cần LLM suy luận):\n"
+            f"- Audit sửa {audit_fixes} lỗi cấu trúc.\n"
+            f"- Xóa {removed_zero_len} đối tượng có chiều dài bằng 0 (rác vẽ).\n"
+            f"- Xóa {removed_dupe_blocks} Block trùng lặp (cùng tên + cùng vị trí).\n"
+            f"- Xóa {len(removed_layers)} Layer rỗng không dùng đến"
+            + (f": {', '.join(removed_layers)}." if removed_layers else ".") + "\n"
+            f"- Đã lưu bản vẽ đã tối ưu tại: {target_path}"
+        )
+    except Exception as e:
+        return f"Lỗi tối ưu bản vẽ CAD: {e}"
+
+
 from src.hvac_tools import (
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
     calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
@@ -691,6 +1018,7 @@ tools = [
     search_standards, search_web, calculate, execute_python_code, list_directory,
     read_excel, write_excel, read_word, write_word, read_pdf,
     read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image, analyze_cad_spatial_context,
+    auto_quantity_takeoff, optimize_cad_drawing,
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
     calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
     calc_cable_size, calc_breaker_size, calc_lighting_qty,
@@ -719,12 +1047,14 @@ TOOLS_BY_ROLE = {
         calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
     ],
     "firefighting": _COMMON_TOOLS + [calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty],
-    "qs": _COMMON_TOOLS + [read_cad, write_excel, analyze_cad_spatial_context, ai_block_recovery],
+    "qs": _COMMON_TOOLS + [
+        auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, ai_block_recovery,
+    ],
     "cad": _COMMON_TOOLS + [
         read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image,
-        analyze_cad_spatial_context, execute_python_code,
+        analyze_cad_spatial_context, execute_python_code, optimize_cad_drawing,
     ],
-    "bim": _COMMON_TOOLS + [read_cad, write_excel, analyze_cad_spatial_context],
+    "bim": _COMMON_TOOLS + [auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context],
 }
 
 def get_tools_for_role(role: str) -> list:

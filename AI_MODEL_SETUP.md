@@ -255,7 +255,63 @@ vì nạp hết ngay từ đầu). Hai tính năng này gắn với Anthropic AP
 để tránh làm phức tạp lớp trừu tượng provider hiện có — cân nhắc triển khai riêng nếu
 sau này chuyển hẳn sang Claude làm provider chính. Đã ghi vào `MEPF_BACKLOG.md`.
 
-## 7. Câu hỏi thường gặp
+## 7. Chế độ Offline hoàn toàn / Model AI yếu (Ollama, model nhỏ)
+
+Mục tiêu của mục này: cho phép chạy **toàn bộ hệ thống không cần internet** (LLM cục bộ
+qua Ollama) hoặc dùng **model AI yếu/nhỏ** (Groq free tier, `llama3.1:8b`,...) mà vẫn bóc
+tách khối lượng và tối ưu bản vẽ đúng — bằng cách chuyển gánh nặng suy luận (đếm số, cộng
+chiều dài, soạn JSON) từ LLM sang code Python xác định (deterministic), LLM chỉ cần biết
+gọi đúng 1 tool.
+
+### 7.1. Bóc tách khối lượng bằng 1 tool duy nhất: `auto_quantity_takeoff`
+
+Trước đây, QS/BIM Agent phải tự: gọi `read_cad` → đọc kết quả text → tự đếm/tự cộng số
+trong "đầu" → tự soạn chuỗi JSON đúng cú pháp cho `write_excel`. Đây chính là bước model
+yếu hay sai nhất (soạn sai JSON, đếm nhầm, quên gọi `write_excel`).
+
+`src/tools.py` → `auto_quantity_takeoff(file_path, output_excel_path)` gộp toàn bộ quy
+trình đó thành **một lần gọi tool**, xử lý thuần bằng `ezdxf`/`math`/`pandas` (không dùng
+LLM ở bước tính toán):
+1. Audit làm sạch file CAD.
+2. Đếm số lượng từng Block (thiết bị) theo tên + thuộc tính.
+3. Cộng dồn chiều dài từng tuyến ống/dây theo Layer.
+4. Liên kết Ghi chú văn bản (TEXT/MTEXT) với tuyến ống gần nhất (Spatial Matching) để đặt
+   tên hạng mục đúng theo bản vẽ (ví dụ "Ống uPVC Ø110" thay vì tên layer kỹ thuật thô).
+5. Ghi thẳng ra file Excel (STT, Hạng mục, Đơn vị, Khối lượng, Ghi chú).
+
+QS/BIM Agent hiện được yêu cầu ưu tiên gọi tool này trước tiên (xem `src/agents.py`).
+
+### 7.2. Tối ưu bản vẽ bằng 1 tool duy nhất: `optimize_cad_drawing`
+
+Tương tự, `optimize_cad_drawing(file_path, output_path)` tự động dọn dẹp bản vẽ mà không
+cần LLM tự phán đoán lỗi nào cần sửa: audit, xóa đối tượng chiều dài bằng 0, xóa Block
+trùng lặp (cùng tên + cùng vị trí), xóa Layer rỗng. CAD Agent được yêu cầu gọi tool này khi
+khách yêu cầu "tối ưu"/"dọn dẹp" bản vẽ.
+
+### 7.3. Tra cứu tiêu chuẩn offline hoàn toàn (không cần OPENAI_API_KEY)
+
+`search_standards` trước đây **luôn cần `OPENAI_API_KEY`** (dùng cho `OpenAIEmbeddings`
+của FAISS), nên dù chọn `LLM_PROVIDER=ollama` để chạy offline, tool tra cứu tiêu chuẩn vẫn
+gọi ra internet/API OpenAI. Giờ đây, nếu chưa cấu hình `OPENAI_API_KEY` hợp lệ hoặc chưa
+chạy `ingest`, `search_standards` tự động rơi về `_offline_keyword_search` — so khớp từ
+khóa (Jaccard, có bỏ dấu tiếng Việt) trên toàn bộ nội dung `data/standards/*.txt`, không
+gọi mạng, không cần model embedding nào. Kết quả kém chính xác hơn vector search ngữ
+nghĩa nhưng đảm bảo tính năng vẫn hoạt động ở chế độ 100% offline.
+
+### 7.4. Cấu hình khuyến nghị cho offline hoàn toàn (Ollama)
+
+```env
+LLM_PROVIDER=ollama
+MODEL_NAME=llama3.1:8b
+```
+
+Không cần đặt bất kỳ `*_API_KEY` nào. Chạy Ollama cục bộ (`ollama serve`, đã `ollama pull
+llama3.1:8b`), sau đó `uv run streamlit run app.py` — mọi bước LLM (định tuyến, sinh câu
+trả lời, review) lẫn tra cứu tiêu chuẩn, bóc khối lượng, tối ưu bản vẽ đều chạy được
+không cần internet. Cân nhắc nâng riêng vai trò `QS`/`CAD`/`REVIEWER` lên provider cloud
+(xem Mục 3.2) nếu model local quá yếu để tuân thủ chuỗi tool-calling ổn định.
+
+## 8. Câu hỏi thường gặp
 
 **Q: Nếu chỉ đặt `QS_MODEL_NAME` mà không đặt `QS_LLM_PROVIDER` thì sao?**
 A: `QS_LLM_PROVIDER` sẽ rơi về `LLM_PROVIDER` toàn cục. Chỉ cần đặt provider riêng khi
