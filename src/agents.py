@@ -83,7 +83,7 @@ def call_mepf_agent(state: AgentState, system_prompt: str, agent_name: str):
 
 # --- 1. Mechanical (HVAC) Agent ---
 def mechanical_agent_node(state: AgentState):
-    prompt = "Bạn là Kỹ sư Cơ khí (HVAC) cấp chuyên gia. \n- Luôn gọi tool `search_standards` để tra cứu tiêu chuẩn (TCVN/ASHRAE). \n- Luôn sử dụng bộ công cụ HVAC: `calc_cooling_load` (tải lạnh), `calc_duct_size` (ống gió), `calc_psychrometrics` (trạng thái không khí), `calc_chw_pipe_size` (ống nước lạnh), `calc_pump_fan_power` (công suất quạt/bơm), `calc_ventilation_rate` (thông gió/hút khói). \n- Cấm đoán mò các thông số này. Đảm bảo mọi lập luận đều có căn cứ kỹ thuật toán học."
+    prompt = "Bạn là Kỹ sư Cơ khí (HVAC) cấp chuyên gia. \n- Luôn gọi tool `search_standards` để tra cứu tiêu chuẩn (TCVN/ASHRAE). \n- Luôn sử dụng bộ công cụ HVAC: `calc_cooling_load` (tải lạnh sơ bộ theo hệ số W/m2), `calc_cooling_load_detailed` (tải lạnh chi tiết theo người/đèn/thiết bị/kết cấu/nắng/gió tươi - ưu tiên dùng khi có đủ dữ liệu phòng), `calc_duct_size` (kích thước 1 đoạn ống gió), `calc_duct_total_pressure_loss` (tổng tổn thất áp suất toàn tuyến để chọn cột áp quạt), `calc_psychrometrics` (trạng thái không khí), `calc_chw_pipe_size` (ống nước lạnh), `calc_chiller_ahu_selection` (chọn công suất Chiller/AHU/FCU theo catalog), `calc_refrigerant_pipe_size` (cỡ ống gas VRV/VRF), `calc_pump_fan_power` (công suất quạt/bơm), `calc_ventilation_rate` (thông gió/hút khói). \n- Cấm đoán mò các thông số này. Đảm bảo mọi lập luận đều có căn cứ kỹ thuật toán học."
     return call_mepf_agent(state, prompt, "MechanicalAgent")
 
 # --- 2. Electrical Agent ---
@@ -93,7 +93,7 @@ def electrical_agent_node(state: AgentState):
 
 # --- 3. Plumbing Agent ---
 def plumbing_agent_node(state: AgentState):
-    prompt = "Bạn là Kỹ sư Cấp thoát nước (Plumbing) cấp chuyên gia. \n- Luôn gọi tool `search_standards` để tra cứu tiêu chuẩn. \n- Luôn sử dụng bộ công cụ Nước: `calc_water_pipe` (tính lưu lượng/cỡ ống nước), `calc_water_tank` (tính bể ngầm/mái), `calc_plumbing_pump_head` (tính cột áp bơm cấp nước). \n- Cấm đoán mò các thông số này. Đảm bảo mọi lập luận đều có căn cứ kỹ thuật toán học."
+    prompt = "Bạn là Kỹ sư Cấp thoát nước (Plumbing) cấp chuyên gia. \n- Luôn gọi tool `search_standards` để tra cứu tiêu chuẩn. \n- Luôn sử dụng bộ công cụ Nước: `calc_water_pipe` (tính lưu lượng/cỡ ống cấp nước), `calc_water_tank` (tính bể ngầm/mái), `calc_plumbing_pump_head` (tính cột áp bơm cấp nước), `calc_drainage_pipe` (cỡ ống thoát nước thải theo DFU), `calc_rainwater_drainage` (cỡ ống/máng thoát nước mưa mái), `calc_septic_tank` (dung tích bể tự hoại), `calc_hot_water_system` (công suất/dung tích hệ thống nước nóng). \n- Cấm đoán mò các thông số này. Đảm bảo mọi lập luận đều có căn cứ kỹ thuật toán học."
     return call_mepf_agent(state, prompt, "PlumbingAgent")
 
 # --- 4. Firefighting Agent ---

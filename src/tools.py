@@ -676,9 +676,15 @@ def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) ->
     except Exception as e:
         return f"Lỗi phân tích ngữ cảnh không gian CAD: {e}"
 
-from src.hvac_tools import calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate
+from src.hvac_tools import (
+    calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
+    calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
+)
 from src.elec_tools import calc_cable_size, calc_breaker_size, calc_lighting_qty
-from src.plumb_tools import calc_water_pipe, calc_water_tank, calc_plumbing_pump_head
+from src.plumb_tools import (
+    calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
+    calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
+)
 from src.ff_tools import calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty
 
 tools = [
@@ -686,7 +692,9 @@ tools = [
     read_excel, write_excel, read_word, write_word, read_pdf,
     read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image, analyze_cad_spatial_context,
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
+    calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
     calc_cable_size, calc_breaker_size, calc_lighting_qty,
     calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
+    calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
     calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty
 ]
