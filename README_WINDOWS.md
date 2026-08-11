@@ -48,9 +48,10 @@ uv run uvicorn src.api:app --host 0.0.0.0 --port 8083 --reload
 ```
 
 ### 💻 Terminal 4: Chạy Web Frontend (React/Vite)
-Giao diện người dùng.
+Giao diện người dùng. Sếp nhớ phải cd vào thư mục `web/` chứa mã nguồn frontend.
 
 ```powershell
+cd web
 npm install
 npm run dev
 ```
