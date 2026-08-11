@@ -688,7 +688,7 @@ from src.plumb_tools import (
 from src.ff_tools import calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty
 
 tools = [
-    search_web, execute_python_code, list_directory,
+    search_standards, search_web, calculate, execute_python_code, list_directory,
     read_excel, write_excel, read_word, write_word, read_pdf,
     read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image, analyze_cad_spatial_context,
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
@@ -698,3 +698,36 @@ tools = [
     calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
     calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty
 ]
+
+# Giảm token: trước đây MỌI agent đều bị bind cả danh sách `tools` đầy đủ (30+ schema),
+# kể cả tool hoàn toàn không liên quan chuyên môn (VD: ElectricalAgent vẫn nhận schema
+# đọc/ghi CAD, tính PCCC...). Tách theo từng vai trò để mỗi agent chỉ gửi kèm tool nó
+# thực sự cần trong LLM request, cắt đáng kể input token mỗi lượt gọi mà không đổi
+# hành vi (ToolNode trong src/graph.py vẫn dùng `tools` đầy đủ để thực thi bất kỳ
+# tool_call nào, không phụ thuộc danh sách bind ở đây).
+_COMMON_TOOLS = [search_standards, search_web, calculate, list_directory, read_excel, read_word, read_pdf]
+
+TOOLS_BY_ROLE = {
+    "mechanical": _COMMON_TOOLS + [
+        calc_cooling_load, calc_cooling_load_detailed, calc_duct_size, calc_duct_total_pressure_loss,
+        calc_psychrometrics, calc_chw_pipe_size, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
+        calc_pump_fan_power, calc_ventilation_rate,
+    ],
+    "electrical": _COMMON_TOOLS + [calc_cable_size, calc_breaker_size, calc_lighting_qty],
+    "plumbing": _COMMON_TOOLS + [
+        calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
+        calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
+    ],
+    "firefighting": _COMMON_TOOLS + [calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty],
+    "qs": _COMMON_TOOLS + [read_cad, write_excel, analyze_cad_spatial_context, ai_block_recovery],
+    "cad": _COMMON_TOOLS + [
+        read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image,
+        analyze_cad_spatial_context, execute_python_code,
+    ],
+    "bim": _COMMON_TOOLS + [read_cad, write_excel, analyze_cad_spatial_context],
+}
+
+def get_tools_for_role(role: str) -> list:
+    """Tool set thu gọn cho một vai trò cụ thể; vai trò không xác định (VD: Supervisor
+    gọi nhầm) sẽ nhận về toàn bộ `tools` để không bao giờ thiếu tool cần thiết."""
+    return TOOLS_BY_ROLE.get((role or "").lower().strip(), tools)

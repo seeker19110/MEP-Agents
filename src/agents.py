@@ -4,7 +4,7 @@ from src.state import AgentState
 from src.config import settings
 from pydantic import BaseModel, Field
 from typing import Literal
-from src.tools import tools
+from src.tools import get_tools_for_role
 
 from dotenv import load_dotenv
 from functools import lru_cache
@@ -91,7 +91,7 @@ def call_mepf_agent(state: AgentState, system_prompt: str, agent_name: str):
 
     role = agent_name[:-5] if agent_name.endswith("Agent") else agent_name  # "MechanicalAgent" -> "Mechanical"
     llm = get_llm(role)
-    tool_llm = llm.bind_tools(tools)
+    tool_llm = llm.bind_tools(get_tools_for_role(role))
     
     try:
         response = tool_llm.invoke([sys_msg] + messages)

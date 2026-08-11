@@ -163,11 +163,39 @@ Giá tham khảo (USD / 1 triệu token, tại thời điểm viết tài liệu
 | Claude Sonnet 5 | $3.00 (ưu đãi $2.00 đến 2026-08-31) | $15.00 (ưu đãi $10.00) |
 | Claude Opus 5 | $5.00 | $25.00 |
 
-Vì mỗi lượt gọi agent hiện đang gửi kèm **toàn bộ 30+ tool schema** (`src/tools.py` →
-`tools`) cho mọi vai trò — kể cả những agent không dùng đến phần lớn tool đó — chi phí
-input token sẽ cao hơn mức tối thiểu cần thiết. Đây là khoản tối ưu tiềm năng cho đợt
-sau (tách tool set theo từng agent thay vì dùng chung danh sách `tools` toàn cục),
-chưa nằm trong phạm vi tài liệu này — đã ghi vào `MEPF_BACKLOG.md`.
+### Đã tối ưu: tool schema theo từng vai trò (giảm token)
+
+Trước đây mỗi lượt gọi agent gửi kèm **toàn bộ 30+ tool schema** (`src/tools.py` →
+`tools`) cho mọi vai trò, kể cả tool hoàn toàn không liên quan (VD: ElectricalAgent
+vẫn nhận schema đọc/ghi CAD, tính PCCC...). `src/tools.py` giờ có `TOOLS_BY_ROLE` +
+`get_tools_for_role(role)` để mỗi agent chỉ nhận đúng tool nó cần:
+
+| Vai trò | Số tool trước | Số tool sau |
+|---|---|---|
+| Electrical / Firefighting / BIM | 39 | 10 |
+| QS | 39 | 11 |
+| Plumbing / CAD | 39 | 14 |
+| Mechanical | 39 | 17 |
+
+Cắt trực tiếp phần lớn input token của mỗi request đến LLM, áp dụng cho **mọi
+provider** (không riêng Claude) vì đây là số lượng JSON schema gửi kèm request, không
+phải tính năng riêng của Anthropic API. Supervisor/Reviewer không bị ảnh hưởng — hai
+vai trò này vốn không bind tool nào (`with_structured_output` thuần túy).
+
+*Trong lúc viết test cho thay đổi này, phát hiện thêm một bug: `search_standards` và
+`calculate` được định nghĩa bằng `@tool` nhưng chưa từng có trong danh sách `tools`
+toàn cục — nghĩa là dù mọi prompt phòng ban đều ghi "Luôn gọi tool `search_standards`",
+LLM chưa bao giờ thực sự có tool đó trong tay để gọi. Đã bổ sung vào `tools` để tính
+năng RAG tra cứu tiêu chuẩn hoạt động đúng như thiết kế.*
+
+### Các tính năng giảm token khác (đặc thù Anthropic, chưa áp dụng)
+
+Anthropic API còn có **prompt caching** (cache system prompt lặp lại giữa các lượt,
+giảm ~90% chi phí phần được cache) và **tool search** (chỉ nạp schema tool khi cần thay
+vì nạp hết ngay từ đầu). Hai tính năng này gắn với Anthropic API/SDK trực tiếp, còn dự
+án dùng LangChain đa provider (openai/groq/gemini/anthropic/ollama) nên chưa tích hợp
+để tránh làm phức tạp lớp trừu tượng provider hiện có — cân nhắc triển khai riêng nếu
+sau này chuyển hẳn sang Claude làm provider chính. Đã ghi vào `MEPF_BACKLOG.md`.
 
 ## 7. Câu hỏi thường gặp
 

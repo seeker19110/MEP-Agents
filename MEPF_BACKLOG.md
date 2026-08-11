@@ -46,3 +46,11 @@ Ghi lại các đề xuất tối ưu đã thảo luận nhưng **chưa** đưa 
 - [ ] Mở rộng CSDL tiêu chuẩn cho RAG — hiện `data/standards/` chỉ có 2 file mẫu
   (`ashrae_hvac.txt`, `tcvn_mau.txt`), tra cứu tiêu chuẩn còn rất mỏng.
 - [ ] Theo dõi phiên bản/revision bản vẽ CAD giữa các lần chỉnh sửa.
+- [x] ~~Tách tool schema theo từng vai trò để giảm token mỗi lượt gọi LLM~~ — đã làm
+  (`src/tools.py` → `TOOLS_BY_ROLE`/`get_tools_for_role`), xem `AI_MODEL_SETUP.md` §6.
+- [ ] **Prompt caching (Anthropic)** — cache system prompt lặp lại giữa các lượt hội
+  thoại để giảm ~90% chi phí phần được cache. Cần tích hợp riêng cho provider Anthropic
+  (không áp dụng chung được qua lớp trừu tượng đa provider hiện tại).
+- [ ] **Tool search (Anthropic beta)** — chỉ nạp schema tool khi cần thay vì nạp hết
+  ngay từ đầu, giảm thêm token cho các vai trò còn nhiều tool (Mechanical, Plumbing,
+  CAD). Cũng đặc thù Anthropic API.
