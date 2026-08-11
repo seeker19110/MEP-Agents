@@ -163,6 +163,64 @@ Giá tham khảo (USD / 1 triệu token, tại thời điểm viết tài liệu
 | Claude Sonnet 5 | $3.00 (ưu đãi $2.00 đến 2026-08-31) | $15.00 (ưu đãi $10.00) |
 | Claude Opus 5 | $5.00 | $25.00 |
 
+### Ước tính chi phí theo kịch bản thực tế (đo trực tiếp từ code, không phải phỏng đoán)
+
+Đo bằng cách đếm ký tự thực tế của system prompt (`src/agents.py`) + tool schema JSON
+(`src/tools.py` → `get_tools_for_role`) cho từng vai trò, quy đổi ~4 ký tự/token (cùng
+heuristic `app.py` đang dùng để hiển thị tốc độ sinh AI real-time). Đây là ước tính sơ
+bộ (không phải `count_tokens` API chính xác), đủ để so sánh tương đối giữa các lựa
+chọn cấu hình.
+
+**Kịch bản 1 — Yêu cầu đơn giản 1 phòng ban** (VD: "Tính tải lạnh phòng 30m², 6 người"):
+Supervisor định tuyến → Mechanical gọi tool → Mechanical trả lời → Reviewer duyệt →
+Supervisor kết thúc (5 lượt gọi LLM, ~6.800 input + ~380 output token):
+
+| Model | Chi phí / yêu cầu | Chi phí / 1.000 yêu cầu |
+|---|---|---|
+| Claude Haiku 4.5 | ~$0.0087 | ~$8.70 |
+| Claude Sonnet 5 (giá ưu đãi) | ~$0.0174 | ~$17.40 |
+| Claude Sonnet 5 (giá chuẩn) | ~$0.0261 | ~$26.10 |
+| Claude Opus 5 | ~$0.0435 | ~$43.50 |
+
+**Kịch bản 2 — Yêu cầu phức tạp QS** (đọc bản vẽ CAD + phân tích không gian + xuất
+Excel dự toán): Supervisor → QS gọi `read_cad` → QS gọi `analyze_cad_spatial_context`
+→ QS gọi `write_excel` → QS trả lời → Reviewer → Supervisor (7 lượt gọi LLM, ~11.900
+input + ~640 output token — nặng hơn do dữ liệu CAD ~4KB được đọc vào context):
+
+| Model | Chi phí / yêu cầu | Chi phí / 1.000 yêu cầu |
+|---|---|---|
+| Claude Haiku 4.5 | ~$0.0151 | ~$15.10 |
+| Claude Sonnet 5 (giá ưu đãi) | ~$0.0303 | ~$30.30 |
+| Claude Sonnet 5 (giá chuẩn) | ~$0.0454 | ~$45.40 |
+| Claude Opus 5 | ~$0.0757 | ~$75.70 |
+
+### Tác động thực tế của việc tách tool schema theo vai trò
+
+So sánh Kịch bản 1 (HVAC) trên cùng Sonnet 5, **trước và sau** khi tách tool schema
+theo vai trò (Mục "Đã tối ưu" bên dưới):
+
+| | Chi phí / 1.000 yêu cầu |
+|---|---|
+| Trước (bind cả 39 tool cho mọi agent) | ~$668.80 |
+| Sau (Mechanical chỉ nhận 17 tool liên quan) | ~$417.70 |
+| **Tiết kiệm** | **~37.5%** |
+
+### Dự phóng chi phí hàng tháng theo 3 chiến lược (Mục 3)
+
+Giả định 50 yêu cầu/ngày, tỉ lệ 70% đơn giản (HVAC/Điện/Nước/PCCC) : 30% phức tạp
+(QS/CAD) — mức dùng thử của một văn phòng tư vấn nhỏ:
+
+| Chiến lược | Cấu hình | Chi phí ước tính/tháng |
+|---|---|---|
+| 3.1 Cân bằng | Sonnet 5 mặc định + Opus 5 cho QS/CAD | **~$52** |
+| 3.2 Tối ưu chi phí | Groq (free tier) cho phần lớn + Opus 5 chỉ cho QS/CAD | **~$34** + Groq free tier |
+| 3.3 Chất lượng tối đa | Toàn bộ Opus 5 | **~$80** |
+
+Ở quy mô nhỏ (dưới ~1.500 yêu cầu/tháng), chênh lệch tuyệt đối giữa 3 chiến lược chỉ
+vài chục USD — nên ưu tiên **Chiến lược 3.1 (Cân bằng)** làm mặc định, chỉ chuyển sang
+3.2 khi traffic đủ lớn để phần chênh lệch có ý nghĩa, hoặc 3.3 khi dự án có yêu cầu độ
+chính xác/pháp lý cao hơn mức tiết kiệm chi phí.
+
 ### Đã tối ưu: tool schema theo từng vai trò (giảm token)
 
 Trước đây mỗi lượt gọi agent gửi kèm **toàn bộ 30+ tool schema** (`src/tools.py` →
