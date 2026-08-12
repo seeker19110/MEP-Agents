@@ -854,11 +854,9 @@ def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) ->
     except Exception as e:
         return f"Lỗi phân tích ngữ cảnh không gian CAD: {e}"
 
-# Bản đồ mã INSUNITS (DXF group code $INSUNITS) sang tên đơn vị dễ đọc.
-_INSUNITS_NAMES = {
-    0: "Không xác định (Unitless)", 1: "Inch", 2: "Feet", 4: "Millimet (mm)",
-    5: "Centimet (cm)", 6: "Met (m)", 8: "Microinch", 9: "Mil",
-}
+# Bản đồ mã INSUNITS (DXF group code $INSUNITS) sang tên đơn vị dễ đọc. Dùng chung một
+# nguồn với `src/cad_units.py` để hai chỗ không mô tả cùng một mã bằng hai cái tên khác nhau.
+from src.cad_units import INSUNITS_NAMES as _INSUNITS_NAMES  # noqa: E402
 
 
 @tool
@@ -896,13 +894,25 @@ def audit_cad_drawing_errors(file_path: str, text_duplicate_tolerance: float = 1
 
         # 1. Đơn vị bản vẽ.
         insunits = doc.header.get('$INSUNITS', 0)
-        if insunits != 4:
-            unit_name = _INSUNITS_NAMES.get(insunits, f"Mã INSUNITS={insunits} (không xác định)")
+        unit_name = _INSUNITS_NAMES.get(insunits, f"Mã INSUNITS={insunits} (không xác định)")
+        if insunits == 0:
+            # Unitless là trường hợp NGUY HIỂM THẬT: không có gì để quy đổi theo, nên
+            # `auto_quantity_takeoff` buộc phải tạm coi là mm.
             issues.append(
-                f"[NGHIÊM TRỌNG] Đơn vị bản vẽ hiện là '{unit_name}', KHÔNG PHẢI Millimet (mm). "
-                f"Toàn bộ hệ thống giả định bản vẽ vẽ bằng mm — nếu khách thực sự vẽ bằng đơn vị "
-                f"khác, MỌI kích thước/khối lượng tính từ bản vẽ này đều SAI LỆCH. Cần hỏi lại "
-                f"khách đơn vị vẽ thực tế trước khi xử lý tiếp."
+                "[NGHIÊM TRỌNG] Bản vẽ KHÔNG khai báo đơn vị ($INSUNITS=0). Bóc khối lượng sẽ "
+                "phải tạm coi bản vẽ vẽ bằng mm; nếu khách vẽ bằng đơn vị khác thì MỌI kích "
+                "thước/khối lượng đều sai theo tỷ lệ chênh lệch. Hỏi lại khách đơn vị vẽ thực "
+                "tế, rồi truyền `drawing_unit` khi gọi `auto_quantity_takeoff`."
+            )
+        elif insunits != 4:
+            # Khai rõ đơn vị khác mm KHÔNG còn là lỗi tính toán — `auto_quantity_takeoff`
+            # quy đổi đúng theo header. Vẫn nêu ra vì hồ sơ MEPF Việt Nam quen dùng mm và
+            # đơn vị lạ thường là dấu hiệu file đi qua nhiều lần convert.
+            issues.append(
+                f"[LƯU Ý] Đơn vị bản vẽ là '{unit_name}', không phải Millimet (mm) theo thông lệ "
+                f"hồ sơ MEPF Việt Nam. Khối lượng vẫn được quy đổi ĐÚNG theo đơn vị này, nhưng "
+                f"nên xác nhận với khách rằng header phản ánh đúng đơn vị đã vẽ — header sai là "
+                f"chuyện thường gặp sau vài lần convert file."
             )
 
         # 2. Vẽ trực tiếp trên Layer "0".

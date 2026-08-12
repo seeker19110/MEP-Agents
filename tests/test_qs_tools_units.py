@@ -18,7 +18,7 @@ def workspace(tmp_path):
 def test_pipe_length_is_converted_from_mm_to_m(workspace):
     """1 đoạn thẳng dài đúng 6000 đơn vị bản vẽ (mm, khớp DEFAULT_PIPE_STOCK_LENGTH)
     phải ra đúng 6.0 m trong bảng BOQ, KHÔNG PHẢI 6000."""
-    doc = ezdxf.new()
+    doc = ezdxf.new(units=4)
     msp = doc.modelspace()
     doc.layers.add("PIPE_UNIT_TEST")
     msp.add_line((0, 0), (6000, 0), dxfattribs={"layer": "PIPE_UNIT_TEST"})

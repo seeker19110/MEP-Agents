@@ -349,6 +349,132 @@ def block_scale(entity):
     )
 
 
+def insert_repeat_count(entity) -> int:
+    """Số bản sao THẬT mà một INSERT tạo ra trên bản vẽ (MINSERT = lưới hàng x cột).
+
+    DXF cho phép một entity INSERT duy nhất nhân bản thành lưới `row_count x column_count`
+    (lệnh MINSERT của AutoCAD, hay dùng cho dàn đèn trần, dàn đầu phun sprinkler). Đếm mỗi
+    INSERT là 1 thiết bị sẽ bóc thiếu cả một dàn — 1 thay vì 40 bộ đèn.
+    """
+    rows = int(getattr(entity.dxf, "row_count", 1) or 1)
+    cols = int(getattr(entity.dxf, "column_count", 1) or 1)
+    return max(1, rows) * max(1, cols)
+
+
+def _insert_transform(entity):
+    """(gốc chèn, xscale, yscale, rotation độ, hệ số nhân chiều dài) của một INSERT."""
+    insert = entity.dxf.insert
+    base = (insert.x, insert.y, getattr(insert, "z", 0.0) or 0.0)
+    xscale, yscale, _ = block_scale(entity)
+    rotation = float(getattr(entity.dxf, "rotation", 0.0) or 0.0)
+    # Tỷ lệ không đều (xscale != yscale) không có một hệ số chiều dài đúng cho mọi hướng;
+    # trung bình hình học là xấp xỉ hợp lý và không thiên lệch theo hướng tuyến.
+    length_factor = math.sqrt(abs(xscale * yscale)) or 1.0
+    return base, xscale, yscale, rotation, length_factor
+
+
+def _transform_point(point, base, xscale, yscale, rotation_deg):
+    """Đưa một điểm từ hệ tọa độ nội bộ của block về hệ tọa độ không gian chứa nó."""
+    x, y = point[0] * xscale, point[1] * yscale
+    if rotation_deg:
+        rad = math.radians(rotation_deg)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+        x, y = x * cos_a - y * sin_a, x * sin_a + y * cos_a
+    z = point[2] if len(point) > 2 else 0.0
+    return (x + base[0], y + base[1], z + base[2])
+
+
+def _minsert_offsets(entity, rotation_deg):
+    """Vị trí gốc của từng bản sao trong lưới MINSERT, tính từ gốc chèn (0,0) là bản đầu."""
+    rows = max(1, int(getattr(entity.dxf, "row_count", 1) or 1))
+    cols = max(1, int(getattr(entity.dxf, "column_count", 1) or 1))
+    if rows == 1 and cols == 1:
+        return [(0.0, 0.0)]
+    row_gap = float(getattr(entity.dxf, "row_spacing", 0.0) or 0.0)
+    col_gap = float(getattr(entity.dxf, "column_spacing", 0.0) or 0.0)
+    rad = math.radians(rotation_deg)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    offsets = []
+    for r in range(rows):
+        for c in range(cols):
+            dx, dy = c * col_gap, r * row_gap
+            offsets.append((dx * cos_a - dy * sin_a, dx * sin_a + dy * cos_a))
+    return offsets
+
+
+def explode_insert(entity, doc, max_depth: int = 8, _depth: int = 0):
+    """Nội dung THẬT bên trong một INSERT: `(segments, nested_inserts)`.
+
+    Hồ sơ MEPF thực tế đóng gói rất nhiều thứ thành Block: một cụm WC, một dàn đèn, một
+    module ống gió lặp lại. Duyệt modelspace mà chỉ đếm INSERT rồi bỏ qua ruột của nó thì
+    **toàn bộ ống/dây vẽ bên trong block bị bóc thiếu 100%** — không có một dòng cảnh báo
+    nào, vì bảng khối lượng vẫn ra bình thường với các tuyến vẽ trực tiếp.
+
+    Hàm này bung block về hệ tọa độ bản vẽ chính (tỷ lệ, góc xoay, lưới MINSERT), đệ quy
+    qua block lồng nhau (có `max_depth` chặn block tự tham chiếu vòng), và áp quy tắc
+    layer của CAD: entity nằm trên layer "0" bên trong block **thừa hưởng layer của
+    INSERT** — bỏ qua quy tắc này thì cả tuyến ống bị dồn hết về layer "0" và mất hệ.
+
+    XREF được bỏ qua ở đây vì đã có đường xử lý riêng (`cad_loader.resolve_xref_segments`),
+    gộp cả hai sẽ tính đôi.
+
+    `nested_inserts` là danh sách `(tên block, số lượng)` của thiết bị nằm trong block, để
+    hàm gọi cộng vào bảng đếm thiết bị.
+    """
+    segments, nested_inserts = [], []
+    if _depth >= max_depth or doc is None:
+        return segments, nested_inserts
+
+    name = getattr(entity.dxf, "name", "")
+    try:
+        block = doc.blocks.get(name)
+    except Exception:
+        block = None
+    if block is None or getattr(block, "is_xref", False):
+        return segments, nested_inserts
+
+    base, xscale, yscale, rotation, length_factor = _insert_transform(entity)
+    host_layer = getattr(entity.dxf, "layer", "0")
+    copies = _minsert_offsets(entity, rotation)
+
+    for child in block:
+        child_layer = getattr(child.dxf, "layer", "0")
+        # Layer "0" trong block là layer "trong suốt": thực thể hiện lên theo layer của INSERT.
+        effective_layer = host_layer if child_layer == "0" else child_layer
+
+        if child.dxftype() == "INSERT":
+            sub_segments, sub_inserts = explode_insert(child, doc, max_depth, _depth + 1)
+            # Mỗi INSERT lồng bên trong là một thiết bị được chèn thật, đếm nó y như một
+            # INSERT ở modelspace (nhân theo lưới MINSERT của chính nó).
+            sub_inserts = [(child.dxf.name, insert_repeat_count(child))] + list(sub_inserts)
+            for dx, dy in copies:
+                for seg in sub_segments:
+                    item = dict(seg)
+                    item["start"] = _transform_point(seg["start"], (base[0] + dx, base[1] + dy, base[2]),
+                                                     xscale, yscale, rotation)
+                    item["end"] = _transform_point(seg["end"], (base[0] + dx, base[1] + dy, base[2]),
+                                                   xscale, yscale, rotation)
+                    item["length"] = seg["length"] * length_factor
+                    if item.get("layer", "0") == "0":
+                        item["layer"] = host_layer
+                    segments.append(item)
+                nested_inserts.extend(sub_inserts)
+            continue
+
+        for seg in entity_segments(child):
+            for dx, dy in copies:
+                item = dict(seg)
+                item["layer"] = effective_layer
+                item["start"] = _transform_point(seg["start"], (base[0] + dx, base[1] + dy, base[2]),
+                                                 xscale, yscale, rotation)
+                item["end"] = _transform_point(seg["end"], (base[0] + dx, base[1] + dy, base[2]),
+                                               xscale, yscale, rotation)
+                item["length"] = seg["length"] * length_factor
+                segments.append(item)
+
+    return segments, nested_inserts
+
+
 def _subdivide_bulge(x1, y1, x2, y2, bulge, n=8):
     """Rời rạc hóa một cung bulge thành `n` điểm trung gian, để dùng cho giao cắt
     hình học (thẳng-thẳng) mà không phải giải phương trình đường tròn."""
