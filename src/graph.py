@@ -10,6 +10,8 @@ from src.tools import tools as _base_tools
 from src.cad_block_replace import replace_blocks_by_mapping
 from src.cad_batch_edit import batch_edit_pipes, batch_replace_text, update_title_block
 from src.cad_macros import prepare_drawing, full_boq
+from src.qs_auditor_tools import qs_audit_checklist
+from src.boq_diff import compare_boq
 from src.agents import (
     supervisor_node, mechanical_agent_node, electrical_agent_node,
     plumbing_agent_node, firefighting_agent_node,
@@ -18,6 +20,10 @@ from src.agents import (
 )
 # Bind Phase A skills into agents.build_tools_for_llm / DELIVERABLE_TOOLS
 import src.agents_phase_a_patch  # noqa: F401
+import src.agents_phase_b_patch  # noqa: F401
+# Re-bind after Phase B wraps supervisor_node (import name is bound early)
+from src import agents as _agents_mod
+supervisor_node = _agents_mod.supervisor_node
 
 # Tool mới đăng ký ngoài `src/tools.py` để tránh đụng file registry quá lớn khi mở rộng
 # từng skill CAD; ToolNode phải thấy đủ tool để thực thi mọi tool_call từ agent.
@@ -28,6 +34,8 @@ tools = list(_base_tools) + [
     update_title_block,
     prepare_drawing,
     full_boq,
+    qs_audit_checklist,
+    compare_boq,
 ]
 
 # 1. Khởi tạo Graph
