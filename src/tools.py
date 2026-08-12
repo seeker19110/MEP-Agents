@@ -533,7 +533,14 @@ def ai_block_recovery(file_path: str, layer: str, shape: str, dimensions: str, r
                             cy = (max(ys) + min(ys)) / 2
                             centers.append((cx, cy))
                             
-        # Dọn rác chuyên sâu: Quét và xóa MỌI nét vẽ (LINE, PLINE, TEXT) nằm lọt thỏm trong vùng Block
+        # Dọn rác chuyên sâu: Quét và xóa MỌI nét vẽ (LINE, PLINE) nằm lọt thỏm trong vùng Block.
+        # TEXT/MTEXT mô tả thường được vẽ trên một layer chú thích RIÊNG (khác layer hình học
+        # đã khai báo trong `layer`) — nếu chỉ lọc theo đúng layer đó, các dòng text này bị bỏ
+        # sót: không xóa (đúng, vì chúng vẫn là mô tả hợp lệ) nhưng cũng không được đồng bộ,
+        # nên sau khi phục hồi Block, khách vẫn thấy "còn text mô tả nhưng lệch layer" so với
+        # Block mới. Ở đây TEXT/MTEXT gần tâm được QUÉT TRÊN MỌI LAYER và đưa layer về đúng
+        # layer của Block vừa phục hồi, thay vì xóa.
+        entities_to_relayer = []
         if max_dim > 0 and centers:
             tolerance = max_dim * 0.6  # Phạm vi dọn rác (Bao trùm block + 10% an toàn)
             for entity in msp.query(f'*[layer=="{layer}"]'):
@@ -550,16 +557,39 @@ def ai_block_recovery(file_path: str, layer: str, shape: str, dimensions: str, r
                         px, py = pts[0][0], pts[0][1]
                     except:
                         pass
-                
+
                 if px is not None and py is not None:
                     for cx, cy in centers:
                         if abs(px - cx) <= tolerance and abs(py - cy) <= tolerance:
                             entities_to_delete.append(entity)
                             break
-                            
+
+            for entity in msp.query('TEXT MTEXT'):
+                if entity.dxf.layer == layer:
+                    continue
+                px, py = None, None
+                if entity.dxftype() == 'TEXT':
+                    px, py = entity.dxf.insert.x, entity.dxf.insert.y
+                elif entity.dxftype() == 'MTEXT':
+                    px, py = entity.dxf.insert.x, entity.dxf.insert.y
+
+                if px is not None and py is not None:
+                    for cx, cy in centers:
+                        if abs(px - cx) <= tolerance and abs(py - cy) <= tolerance:
+                            entities_to_relayer.append(entity)
+                            break
+
         for e in set(entities_to_delete):
             try:
                 msp.delete_entity(e)
+            except:
+                pass
+
+        relayered_count = 0
+        for e in set(entities_to_relayer):
+            try:
+                e.dxf.layer = layer
+                relayered_count += 1
             except:
                 pass
             
@@ -567,7 +597,11 @@ def ai_block_recovery(file_path: str, layer: str, shape: str, dimensions: str, r
             msp.add_blockref(replacement_block, (cx, cy), dxfattribs={'layer': layer})
             
         doc.saveas(safe_path)
-        return f"AI Recovery thành công: Đã tìm thấy và phục hồi {len(centers)} đối tượng '{shape}' thành Block '{replacement_block}'."
+        note = ""
+        if relayered_count:
+            note = f" Đã đồng bộ {relayered_count} dòng text mô tả bị lệch layer về layer '{layer}'."
+        return (f"AI Recovery thành công: Đã tìm thấy và phục hồi {len(centers)} đối tượng '{shape}' "
+                f"thành Block '{replacement_block}'.{note}")
     except Exception as e:
         return f"Lỗi phục hồi Block: {e}"
 
