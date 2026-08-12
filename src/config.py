@@ -8,30 +8,38 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     model_name: str = "gpt-4o-mini"
 
-    # --- Điều khiển vòng lặp tự sửa lỗi (Reviewer retry loop) ---
-    # Số lần Reviewer được phép TỪ CHỐI và bắt worker làm lại trên cùng một yêu cầu.
-    # Hết hạn mức thì luồng dừng kèm cảnh báo, thay vì quay vòng vô tận.
     max_review_retries: int = 2
-    # Trần số bước của LangGraph cho mỗi lượt chạy (chốt chặn cuối cùng).
     recursion_limit: int = 25
-
-    # --- Lịch sử phiên bản bản vẽ CAD ---
-    # Số revision gần nhất giữ lại cho MỖI bản vẽ. Mỗi revision là một bản sao .dxf đầy
-    # đủ, nên phiên sửa bản vẽ nhiều lần sẽ phình dung lượng nếu giữ hết. Đặt 0 để giữ
-    # toàn bộ (không dọn).
     max_cad_revisions: int = 3
-
-    # --- Persistence ---
-    # Đường dẫn file SQLite lưu checkpoint hội thoại. Để rỗng => dùng bộ nhớ RAM
-    # (MemorySaver), mất toàn bộ lịch sử khi restart tiến trình.
     checkpoint_db: str = "data/checkpoints.sqlite"
 
-    # LangSmith
     langchain_tracing_v2: bool = False
     langchain_api_key: str = ""
     langchain_project: str = "x_agents_project"
 
+    # --- Phase C: Postgres / pgvector ---
+    database_url: str = ""
+    use_pgvector: bool = False
+
+    # --- Phase C: S3-compatible object storage ---
+    s3_endpoint_url: str = ""
+    s3_bucket: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "ap-southeast-1"
+    s3_prefix: str = "mep-agents/"
+
+    # --- Phase C: JWT auth ---
+    jwt_secret: str = ""
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24
+    jwt_bootstrap_user: str = "admin"
+    jwt_bootstrap_password: str = ""
+
+    # --- Phase C: YOLO MEPF ---
+    yolo_weights: str = ""
+    yolo_confidence: float = 0.25
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-# Global settings instance
 settings = Settings()
