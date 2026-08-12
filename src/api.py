@@ -1,8 +1,9 @@
 import asyncio
 import os
+import re
 import uuid
 import aiofiles
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -22,9 +23,21 @@ app = FastAPI(
     version="3.0.0"
 )
 
+# Trước đây cố định "*" — origin bất kỳ đều gọi được, và đi kèm allow_credentials=True là
+# tổ hợp bị trình duyệt tự chặn theo spec CORS (không cho gửi credential kèm origin
+# wildcard), nên phần allow_credentials gần như vô nghĩa trong khi lại đánh lừa người đọc
+# code là "đã kiểm soát credential". Nay đọc danh sách origin thật từ biến môi trường
+# CORS_ALLOWED_ORIGINS (phân tách bằng dấu phẩy); không đặt thì mặc định về các origin dev
+# cục bộ (Vite/CRA) thay vì mở toàn bộ Internet. Xem TECH_DEBT.md mục 7.
+_cors_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
+if _cors_origins_env:
+    _CORS_ORIGINS = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+else:
+    _CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,6 +45,47 @@ app.add_middleware(
 
 UPLOAD_DIR = os.path.join(get_project_root(), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# --- Xác thực API tối thiểu (xem TECH_DEBT.md mục 7) -----------------------------------
+# Trước đây KHÔNG có xác thực nào — ai gọi được tới server đều dùng được toàn bộ endpoint,
+# kể cả upload/ghi file và tiêu tốn tài nguyên Celery worker. Đây là dependency tối thiểu:
+# nếu MEP_AGENTS_API_KEY được đặt (production/server public), mọi request phải kèm header
+# `X-API-Key` khớp giá trị đó. Nếu KHÔNG đặt (mặc định máy dev cục bộ), endpoint vẫn mở
+# hoàn toàn như trước — giữ đúng triết lý "graceful fallback khi chưa cấu hình" đã dùng ở
+# những chỗ khác trong dự án (VD Redis cache trong qs_tools.py), không phá trải nghiệm dev
+# hiện có. KHÔNG thay thế được xác thực người dùng thật (JWT/OAuth) cho SaaS đa người dùng
+# — đó vẫn là việc của mục 6 (Billing) trong TECH_DEBT.md.
+_API_KEY = os.environ.get("MEP_AGENTS_API_KEY", "").strip()
+
+
+def require_api_key(x_api_key: str = Header(default=""), api_key: str = ""):
+    # Chấp nhận cả header `X-API-Key` (POST/GET gọi bằng fetch/axios) LẪN query string
+    # `?api_key=...` (điều hướng trình duyệt trực tiếp như `window.location.href` cho tải
+    # file — không thể tự set header) — cùng cách xử lý với `ws_task_status` bên dưới.
+    if _API_KEY and x_api_key != _API_KEY and api_key != _API_KEY:
+        raise HTTPException(status_code=401, detail="Thiếu hoặc sai API Key (header X-API-Key hoặc query ?api_key=).")
+
+
+_SAFE_UPLOAD_EXTENSIONS = {".dwg", ".dxf"}
+
+
+def _safe_upload_filename(raw_filename: str) -> str:
+    """Chuyển tên file client gửi lên thành tên AN TOÀN để ghép vào UPLOAD_DIR.
+
+    Trước đây `upload_and_takeoff` dùng thẳng `file.filename` (client tự đặt trong
+    multipart form) để ghép `os.path.join(UPLOAD_DIR, file.filename)` — filename kiểu
+    `../../etc/cron.d/x` sẽ ghi ra NGOÀI UPLOAD_DIR (path traversal / ghi file tùy ý).
+    `os.path.basename` bỏ mọi thành phần thư mục (bao gồm cả `../`), sau đó chỉ giữ lại
+    ký tự an toàn và ép đuôi file về .dwg/.dxf; filename rỗng/toàn ký tự lạ thì sinh tên
+    ngẫu nhiên thay vì từ chối cả upload.
+    """
+    base = os.path.basename(raw_filename or "")
+    name, ext = os.path.splitext(base)
+    ext = ext.lower()
+    if ext not in _SAFE_UPLOAD_EXTENSIONS:
+        ext = ".dxf"
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", name).strip("._") or uuid.uuid4().hex[:8]
+    return f"{name}{ext}"
 
 # Alias thay vì gọi `asyncio.sleep` trực tiếp trong `ws_task_status` — xem comment ở đó.
 _WS_POLL_SLEEP = asyncio.sleep
@@ -54,14 +108,15 @@ class AutoCADPayload(BaseModel):
 def root():
     return {"status": "ok", "message": "Welcome to MEP-Agents Cloud API v3.0"}
 
-@app.post("/api/v1/takeoff", response_model=TaskResponse)
+@app.post("/api/v1/takeoff", response_model=TaskResponse, dependencies=[Depends(require_api_key)])
 async def upload_and_takeoff(file: UploadFile = File(...)):
     """
     Nhận file CAD (.dwg/.dxf) từ Client (Web App), lưu trữ và đẩy vào hàng đợi Celery (Redis)
     để xử lý phân tán, trả về Task ID cho client theo dõi tiến độ (Real-time).
     """
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    
+    safe_filename = _safe_upload_filename(file.filename)
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+
     async with aiofiles.open(file_path, "wb") as buffer:
         content = await file.read()
         await buffer.write(content)
@@ -100,20 +155,27 @@ def _task_status_payload(task_result: AsyncResult) -> dict:
     return {"status": "Processing", "logs": ["Đang khởi tạo Swarm...", "Mechanical: Đang phân tích ống gió..."]}
 
 
-@app.get("/api/v1/task/{task_id}")
+@app.get("/api/v1/task/{task_id}", dependencies=[Depends(require_api_key)])
 def get_task_status(task_id: str):
     task_result = AsyncResult(task_id, app=celery_app)
     return _task_status_payload(task_result)
 
 
 @app.websocket("/ws/task/{task_id}")
-async def ws_task_status(websocket: WebSocket, task_id: str):
+async def ws_task_status(websocket: WebSocket, task_id: str, api_key: str = ""):
     """Đẩy trạng thái tác vụ Celery real-time qua WebSocket thay vì để client tự polling
     HTTP mỗi 1.5s (xem `TECH_DEBT.md` mục 4). Server vẫn kiểm tra Redis/Celery backend theo
     chu kỳ ngắn ở phía trong (Celery result backend không có cơ chế push sẵn), nhưng CLIENT
     chỉ mở đúng 1 kết nối và chỉ nhận dữ liệu khi có thay đổi thật, thay vì tạo lại 1 HTTP
     request driver mỗi lần polling. Tự đóng kết nối khi tác vụ xong (success/error).
+
+    WebSocket không mang được header tùy ý cho handshake test đơn giản như HTTP, nên khi
+    MEP_AGENTS_API_KEY được đặt, client truyền key qua query string `?api_key=...` thay vì
+    header `X-API-Key`. Kết nối bị đóng bằng policy violation (1008) nếu sai/thiếu key.
     """
+    if _API_KEY and api_key != _API_KEY:
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     task_result = AsyncResult(task_id, app=celery_app)
     last_payload = None
@@ -134,7 +196,7 @@ async def ws_task_status(websocket: WebSocket, task_id: str):
         return
     await websocket.close()
 
-@app.get("/api/v1/download/{task_id}")
+@app.get("/api/v1/download/{task_id}", dependencies=[Depends(require_api_key)])
 def download_boq(task_id: str):
     # Trả về file Excel thật từ Celery result
     task_result = AsyncResult(task_id, app=celery_app)
@@ -145,7 +207,7 @@ def download_boq(task_id: str):
             
     return {"error": "File not found"}
 
-@app.post("/api/v1/revit/analyze")
+@app.post("/api/v1/revit/analyze", dependencies=[Depends(require_api_key)])
 async def analyze_revit_model(payload: RevitPayload):
     """
     Nhận gói dữ liệu 3D JSON từ pyRevit Plugin và LẬP BOQ THẬT ngay (khối lượng ống/gió
@@ -176,7 +238,7 @@ async def analyze_revit_model(payload: RevitPayload):
     return {"status": "success", "message": message}
 
 
-@app.get("/api/v1/revit/download/{filename}")
+@app.get("/api/v1/revit/download/{filename}", dependencies=[Depends(require_api_key)])
 def download_revit_boq(filename: str):
     # `filename` do chính server sinh ra (uuid + đuôi cố định) ở analyze_revit_model,
     # nhưng vẫn chặn path traversal (../) và giới hạn vào đúng UPLOAD_DIR để an toàn.
@@ -186,7 +248,7 @@ def download_revit_boq(filename: str):
         return {"error": "File not found"}
     return FileResponse(excel_path, filename=safe_name)
 
-@app.post("/api/v1/autocad/analyze")
+@app.post("/api/v1/autocad/analyze", dependencies=[Depends(require_api_key)])
 async def analyze_autocad_model(payload: AutoCADPayload):
     """
     Nhận đường dẫn file từ AutoCAD (via COM), đẩy vào hàng đợi phân tích bởi Agentic Swarm / Celery.

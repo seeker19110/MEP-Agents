@@ -1,11 +1,20 @@
 import os
 from celery import Celery
 
+# Trước đây hardcode "redis://localhost:6379/0" — chỉ đúng khi API/Worker/Redis chạy
+# CÙNG một máy (dev cục bộ). Trong Docker Compose (xem docker-compose.yml), mỗi service
+# có "localhost" RIÊNG của container mình, nên Worker sẽ không bao giờ kết nối được tới
+# Redis chạy ở container khác — Celery âm thầm không nhận task nào (không lỗi rõ ràng ở
+# đây, chỉ là task .delay() không bao giờ được xử lý). Đọc qua biến môi trường
+# CELERY_BROKER_URL/CELERY_RESULT_BACKEND (docker-compose đặt thành redis://redis:6379/0
+# — "redis" là tên service), không đặt gì thì vẫn rơi về localhost như cũ cho dev cục bộ.
+_REDIS_URL = os.environ.get("CELERY_BROKER_URL") or os.environ.get("REDIS_URL") or "redis://localhost:6379/0"
+
 # Khởi tạo Celery Application sử dụng Redis làm Broker và Backend
 app = Celery(
     'mep_celery',
-    broker='redis://localhost:6379/0',
-    backend='redis://localhost:6379/0'
+    broker=_REDIS_URL,
+    backend=os.environ.get("CELERY_RESULT_BACKEND", _REDIS_URL),
 )
 
 app.conf.update(

@@ -38,6 +38,61 @@ def test_takeoff_upload_queues_celery_task_and_returns_task_id(client, tmp_path,
     assert "drawing.dxf" in body["message"]
 
 
+def test_takeoff_upload_sanitizes_path_traversal_filename(client, tmp_path, monkeypatch):
+    """Trước khi có `_safe_upload_filename`, `file.filename` (client tự đặt trong multipart
+    form) được dùng thẳng trong `os.path.join(UPLOAD_DIR, file.filename)` — filename kiểu
+    "../../evil.txt" sẽ ghi file ra NGOÀI UPLOAD_DIR (path traversal / ghi file tùy ý)."""
+    monkeypatch.setattr(api, "UPLOAD_DIR", str(tmp_path))
+    outside_dir = tmp_path.parent / "outside_marker"
+    resp = client.post(
+        "/api/v1/takeoff",
+        files={"file": ("../../evil.dxf", b"malicious content", "application/octet-stream")},
+    )
+    assert resp.status_code == 200
+    # Không có file nào bị ghi ra ngoài UPLOAD_DIR.
+    assert not outside_dir.exists()
+    # Mọi file thật sự được ghi đều nằm trong UPLOAD_DIR.
+    written = list(tmp_path.iterdir())
+    assert len(written) == 1
+    assert written[0].parent == tmp_path
+    assert ".." not in written[0].name
+
+
+def test_takeoff_upload_rejects_non_cad_extension(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "UPLOAD_DIR", str(tmp_path))
+    resp = client.post(
+        "/api/v1/takeoff",
+        files={"file": ("payload.sh", b"#!/bin/sh\necho pwned", "application/octet-stream")},
+    )
+    assert resp.status_code == 200
+    written = list(tmp_path.iterdir())
+    assert len(written) == 1
+    # Đuôi lạ bị ép về .dxf thay vì giữ nguyên .sh có thể thực thi được.
+    assert written[0].suffix == ".dxf"
+
+
+def test_api_key_blocks_request_without_header_when_configured(client, monkeypatch):
+    monkeypatch.setattr(api, "_API_KEY", "secret-123")
+    resp = client.get("/api/v1/task/some-id")
+    assert resp.status_code == 401
+
+
+def test_api_key_allows_request_with_correct_header(client, monkeypatch):
+    monkeypatch.setattr(api, "_API_KEY", "secret-123")
+    monkeypatch.setattr(api, "AsyncResult", lambda task_id, app: types.SimpleNamespace(state="PENDING", info=None, result=None))
+    resp = client.get("/api/v1/task/some-id", headers={"X-API-Key": "secret-123"})
+    assert resp.status_code == 200
+
+
+def test_api_key_allows_request_with_query_param_for_download_links(client, monkeypatch):
+    """`window.location.href` (tải file trực tiếp trên Web App) không set được header,
+    nên endpoint GET tải file phải chấp nhận cả `?api_key=` trên query string."""
+    monkeypatch.setattr(api, "_API_KEY", "secret-123")
+    monkeypatch.setattr(api, "AsyncResult", lambda task_id, app: types.SimpleNamespace(state="PENDING", info=None, result=None))
+    resp = client.get("/api/v1/task/some-id?api_key=secret-123")
+    assert resp.status_code == 200
+
+
 def test_task_status_pending(client, monkeypatch):
     class _Pending:
         state = "PENDING"

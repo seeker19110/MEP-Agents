@@ -19,23 +19,36 @@ _DEFAULT_API_BASE = "http://localhost:8083"
 _REQUEST_TIMEOUT_SEC = 30
 
 
-def _load_api_base():
-    env_value = os.environ.get("MEP_AGENTS_API_BASE")
-    if env_value:
-        return env_value.rstrip("/")
+def _load_config():
+    cfg = {}
     if os.path.exists(_CONFIG_PATH):
         try:
             with open(_CONFIG_PATH, "r") as f:
                 cfg = json.load(f)
-            base = cfg.get("api_base")
-            if base:
-                return base.rstrip("/")
         except Exception:
             pass  # config hỏng -> rơi về mặc định thay vì chặn cả plugin
+    return cfg
+
+
+def _load_api_base(cfg):
+    env_value = os.environ.get("MEP_AGENTS_API_BASE")
+    if env_value:
+        return env_value.rstrip("/")
+    base = cfg.get("api_base")
+    if base:
+        return base.rstrip("/")
     return _DEFAULT_API_BASE
 
 
-API_BASE = _load_api_base()
+def _load_api_key(cfg):
+    # Chỉ cần đặt khi server bật MEP_AGENTS_API_KEY (xem TECH_DEBT.md mục 7) — máy dev
+    # cục bộ mặc định không cấu hình gì thì server vẫn mở, giá trị này để rỗng cũng được.
+    return os.environ.get("MEP_AGENTS_API_KEY") or cfg.get("api_key") or ""
+
+
+_CONFIG = _load_config()
+API_BASE = _load_api_base(_CONFIG)
+API_KEY = _load_api_key(_CONFIG)
 ANALYZE_URL = API_BASE + "/api/v1/revit/analyze"
 
 doc = revit.doc
@@ -97,7 +110,10 @@ def get_mep_elements():
 
 def _post_json(url, payload_dict):
     payload = json.dumps(payload_dict)
-    req = urllib2.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+    req = urllib2.Request(url, data=payload, headers=headers)
     response = urllib2.urlopen(req, timeout=_REQUEST_TIMEOUT_SEC)
     return json.loads(response.read())
 
@@ -115,6 +131,17 @@ def main():
             "elements": data,
             "project_name": doc.Title,
         })
+    except urllib2.HTTPError as e:
+        if e.code == 401:
+            forms.alert(
+                "Server yêu cầu API Key (401 Unauthorized) nhưng plugin chưa có key đúng.\n\n"
+                "Đặt biến môi trường MEP_AGENTS_API_KEY hoặc thêm \"api_key\" vào config.json "
+                "cạnh script, khớp với MEP_AGENTS_API_KEY phía server.",
+                title="Chưa xác thực",
+            )
+        else:
+            forms.alert("Server trả lỗi HTTP {}: {}".format(e.code, e), title="Lỗi API")
+        return
     except urllib2.URLError as e:
         forms.alert(
             "Không kết nối được tới MEP-Agents Cloud tại {}.\n\n"

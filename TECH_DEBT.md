@@ -6,45 +6,50 @@ Tài liệu này ghi nhận các giới hạn kỹ thuật hiện tại của d�
 
 | # | Mục | Mức độ | Trạng thái |
 |---|-----|--------|------------|
-| 7 | Bảo mật API (path traversal + không xác thực) | 🔴 Khẩn cấp | Chưa làm |
-| 1 | Database & lưu trữ (Postgres/pgvector/S3) | 🟠 Cao | Chưa làm |
-| 3 | Hạ tầng triển khai (Docker) | 🟠 Cao | Chưa làm |
+| 7 | Bảo mật API (path traversal + không xác thực) | 🔴 Khẩn cấp | ✅ Đã trả (path traversal + API key + CORS) |
+| 1 | Database & lưu trữ (Postgres/pgvector/S3) | 🟠 Cao | Chưa làm — cần hạ tầng thật, xem lý do bên dưới |
+| 3 | Hạ tầng triển khai (Docker) | 🟠 Cao | ✅ Đã viết đủ 4 service — **chưa chạy thử được** (không có Docker daemon ở môi trường viết code) |
 | 4 | Real-time (WebSocket) | 🟡 Trung bình | Đã làm 1 phần |
-| 8 | Plugin/Web hardcode địa chỉ server | 🟡 Trung bình | Đã làm 1 phần (Revit/AutoCAD xong, Web chưa) |
-| 5 | Computer Vision (YOLO cho bản vẽ rác) | 🟡 Trung bình | Đã làm 1 phần |
-| 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | Chưa làm |
-| 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm |
-| 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Chưa làm |
+| 8 | Plugin/Web hardcode địa chỉ server | 🟡 Trung bình | ✅ Đã trả (Revit/AutoCAD/Web đều hết hardcode) |
+| 5 | Computer Vision (YOLO cho bản vẽ rác) | 🟡 Trung bình | Đã làm 1 phần — cần dữ liệu gán nhãn thật |
+| 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | Chưa làm — cần phần mềm/hạ tầng thật |
+| 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm — cần phần cứng thật |
+| 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Chưa làm — cần tài khoản cổng thanh toán thật |
+
+**Không trả được trong lượt này** (mục 1, 2, 6, và phần "chạy thử thật" của mục 3/9): đều
+cần tài nguyên không có sẵn trong môi trường viết code hiện tại — dịch vụ Postgres/S3 thật
+để migrate vào, GPU 16-24GB VRAM vật lý, tài khoản Stripe/VNPay thật, hoặc Docker
+daemon/Revit/AutoCAD cài sẵn để chạy thử. Viết code đoán trước cho những việc này (VD tự
+bịa schema Postgres chưa ai duyệt, tự đăng ký Stripe giả) rủi ro cao hơn lợi ích — để lại
+đúng như backlog, chờ người có tài nguyên đó cầm tay làm cùng.
 
 ---
 
-## 7. Bảo mật API (phát hiện khi rà soát, chưa từng ghi nhận trước đây) 🔴
+## 7. Bảo mật API ✅ Đã trả
 
-- **Path traversal / arbitrary file write tại `/api/v1/takeoff`:** `src/api.py` →
-  `upload_and_takeoff` ghi file trực tiếp bằng
-  `os.path.join(UPLOAD_DIR, file.filename)` — **không hề gọi `resolve_safe_path`**
-  như các tool CAD khác trong `src/tools.py`. Client tự đặt tên file trong
-  multipart upload; một filename kiểu `../../../etc/cron.d/x` hoặc chứa `/` sẽ khiến
-  `os.path.join` ghi ra NGOÀI `UPLOAD_DIR`. Đây là lỗ hổng ghi file tùy ý trên
-  endpoint không cần xác thực.
-  **Việc cần làm:** validate/sanitize `file.filename` (chỉ lấy `os.path.basename`,
-  chặn ký tự `..`/`/`, giới hạn đuôi file `.dwg`/`.dxf`) trước khi ghép đường dẫn,
-  giống cách `download_revit_boq` đã làm đúng (`os.path.basename` + kiểm tra
-  `startswith(UPLOAD_DIR)`).
-- **Không có xác thực/phân quyền trên BẤT KỲ endpoint FastAPI nào:** `/api/v1/takeoff`,
-  `/api/v1/revit/analyze`, `/api/v1/autocad/analyze`, download, WebSocket — ai có thể
-  gọi tới server đều dùng được toàn bộ, kể cả upload/ghi file và tiêu tốn tài
-  nguyên Celery worker. Chấp nhận được cho môi trường dev/nội bộ, nhưng KHÔNG an
-  toàn nếu public ra Internet. Cần API key hoặc JWT tối thiểu trước khi deploy
-  ngoài mạng nội bộ — có thể làm cùng lúc với hạng mục 6 (đăng nhập/billing).
-- **`CORSMiddleware` cấu hình `allow_origins=["*"]` cùng `allow_credentials=True`:**
-  đây là tổ hợp mà trình duyệt hiện đại tự chặn theo spec CORS (không cho credential
-  đi kèm origin wildcard), nên hiện tại about phần `allow_credentials=True` gần như
-  vô nghĩa — nhưng lại dễ đánh lừa người đọc code là "đã bật kiểm soát credential"
-  trong khi thực chất origin đang mở hoàn toàn. Cần xác định danh sách origin thật
-  (domain Web App) khi triển khai production thay vì để `*`.
+Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật tài liệu trước), nay đã sửa:
 
-## 1. Cơ sở dữ liệu (Database) & Lưu trữ 🟠
+- **Path traversal / arbitrary file write tại `/api/v1/takeoff`** (`src/api.py`): trước
+  đây `upload_and_takeoff` ghi file bằng `os.path.join(UPLOAD_DIR, file.filename)` —
+  filename client tự đặt trong multipart form có thể chứa `../` để ghi ra ngoài
+  `UPLOAD_DIR`. Đã thêm `_safe_upload_filename()`: lấy `os.path.basename`, lọc ký tự lạ,
+  ép đuôi file về `.dwg`/`.dxf`. Có test `test_takeoff_upload_sanitizes_path_traversal_filename`
+  và `test_takeoff_upload_rejects_non_cad_extension` (`tests/test_api.py`).
+- **Không có xác thực trên bất kỳ endpoint nào:** đã thêm dependency `require_api_key`
+  (kiểm tra header `X-API-Key`, hoặc query `?api_key=` cho endpoint tải file/WebSocket vì
+  điều hướng trình duyệt trực tiếp không set được header) — áp dụng cho mọi endpoint có
+  tác dụng phụ (upload, phân tích, tải file, task status, WebSocket). Bật bằng biến môi
+  trường `MEP_AGENTS_API_KEY` — **không đặt thì vẫn mở như cũ** (mặc định phù hợp dev cục
+  bộ, giữ đúng triết lý "graceful fallback" đã dùng ở chỗ khác trong dự án). Plugin
+  Revit/AutoCAD và Web App đều đã cập nhật để gửi kèm key khi có cấu hình.
+  **LƯU Ý:** đây KHÔNG phải xác thực người dùng thật (JWT/OAuth đa người dùng) — chỉ là 1
+  khóa chung chặn truy cập nặc danh. Xác thực đa người dùng thật vẫn là việc của mục 6.
+- **`CORSMiddleware` từng cấu hình `allow_origins=["*"]` cùng `allow_credentials=True`:**
+  tổ hợp bị trình duyệt tự chặn theo spec, dễ đánh lừa người đọc code. Đã đổi sang đọc
+  danh sách origin từ biến môi trường `CORS_ALLOWED_ORIGINS` (phân tách bằng dấu phẩy),
+  mặc định chỉ cho phép origin dev cục bộ (`http://localhost:5173`) thay vì mở toàn bộ.
+
+## 1. Cơ sở dữ liệu (Database) & Lưu trữ 🟠 Chưa làm
 
 - **Tình trạng hiện tại:** Đang sử dụng Redis làm Message Broker và Cache tạm thời. Các file Excel khối lượng (BOQ) được lưu thẳng vào thư mục `uploads/` trên ổ cứng. Hệ thống Vector Search cho tiêu chuẩn MEPF (FAISS) cũng lưu file index `.faiss` trên disk cục bộ.
 - **Vấn đề (Nợ kỹ thuật):** Không thể quản lý dữ liệu người dùng đa luồng (Multi-tenant) một cách an toàn. Mất dữ liệu khi chuyển server hoặc restart nếu không backup ổ cứng. FAISS local khó đồng bộ khi Scale nhiều worker.
@@ -52,24 +57,41 @@ Tài liệu này ghi nhận các giới hạn kỹ thuật hiện tại của d�
   - Tích hợp **PostgreSQL** để lưu thông tin tài khoản, lịch sử dự án.
   - Sử dụng **pgvector** (extension của PostgreSQL) thay thế FAISS để quản lý CSDL Vector tập trung.
   - Sử dụng AWS S3 (hoặc MinIO) để lưu file CAD/Excel thay vì lưu vào disk cục bộ.
+- **Vì sao chưa trả được lượt này:** đây là việc migrate dữ liệu thật sang hạ tầng thật
+  (Postgres/S3 cụ thể của ai đó) — viết code migration/schema mà không có instance thật để
+  chạy thử và không ai duyệt thiết kế schema là đoán mò, rủi ro cao hơn để trống.
 
-## 2. Giới hạn Phần cứng & Tự chủ AI (Offline Mode) 🟢
+## 2. Giới hạn Phần cứng & Tự chủ AI (Offline Mode) 🟢 Chưa làm
 
 - **Tình trạng hiện tại:** Cấu hình máy chủ phát triển (Core i7, 32GB RAM, RTX A1000 6GB VRAM) gánh rất tốt các tác vụ thuật toán CAD (ezdxf) và luồng API. Tuy nhiên phần AI Core (LangGraph) đang phụ thuộc vào Cloud API (Groq/Gemini).
 - **Vấn đề (Nợ kỹ thuật):** Nếu khách hàng khối MEP yêu cầu "Air-gapped" (bảo mật 100%, không Internet), việc chạy Local LLM (VD: Llama-3 8B) tốn khoảng 6-8GB VRAM, vượt quá khả năng của GPU hiện tại.
 - **Hướng giải quyết:** Bổ sung cấu hình Server vật lý với GPU **16GB - 24GB VRAM** (RTX 4080/4090) cho các gói cài đặt nội bộ (On-premise).
+- **Vì sao chưa trả được:** cần mua/thuê phần cứng GPU thật — không phải việc sửa code.
 
-## 3. Hạ tầng Triển khai (Deployment) 🟠
+## 3. Hạ tầng Triển khai (Deployment) 🟠 Đã viết, chưa chạy thử được
 
-- **Tình trạng hiện tại:** Hệ thống đang chạy trực tiếp trên môi trường Windows (thông qua `uv`, `celery worker`, `redis-server`).
-- **Vấn đề (Nợ kỹ thuật):** Rủi ro "It works on my machine" (Chạy được trên máy dev nhưng lỗi trên server production). Khó tự động mở rộng (Auto-scaling).
-- **Hướng giải quyết:** Viết `Dockerfile` và `docker-compose.yml` để đóng gói toàn bộ Frontend (React), Backend (FastAPI), Worker (Celery) và Broker (Redis). Sẵn sàng deploy lên AWS/GCP hoặc Kubernetes.
-- Ghi chú: repo đã có `Dockerfile` ở gốc dự án, nhưng chỉ đóng gói **Streamlit app**
-  (`CMD ["uv", "run", "streamlit", "run", "app.py", ...]`, expose port 8501) — KHÔNG bao
-  gồm FastAPI (`src/api.py`), Celery worker, Redis, hay Web App React (`web/`). Vẫn cần
-  viết `docker-compose.yml` (hoặc thêm Dockerfile riêng cho từng service) để đóng gói đủ
-  4 thành phần như mô tả ở trên; chưa nên coi mục này là "đã có Docker" chỉ vì có 1 file
-  Dockerfile.
+- **Đã làm:** thêm `docker-compose.yml` đóng gói đủ 5 service: `redis`, `api` (FastAPI,
+  `uvicorn src.api:app`), `worker` (Celery), `streamlit` (`app.py`, UI gốc), `web` (React
+  build tĩnh qua `web/Dockerfile` + Nginx). Sửa 2 chỗ hardcode `redis://localhost:6379`
+  (`src/celery_app.py`, `src/qs_tools.py`) — trong container, "localhost" là chính
+  container đó, không phải service `redis`, nên nếu không sửa thì Worker sẽ không bao giờ
+  kết nối được Redis khi chạy qua Compose (âm thầm không nhận task nào, rất khó debug).
+  Nay đọc qua biến môi trường `CELERY_BROKER_URL`/`REDIS_HOST`, Compose đặt sẵn, không đặt
+  thì vẫn rơi về `localhost` như cũ cho dev cục bộ (không đổi hành vi khi chạy trực tiếp
+  bằng `uv run`).
+- **CHƯA làm — quan trọng, không tự nhận là xong:** `docker-compose.yml` mới được viết và
+  kiểm tra CÚ PHÁP bằng `docker compose config` (parse thành công, resolve đủ 5 service),
+  nhưng **CHƯA từng chạy thật bằng `docker compose up --build`** — môi trường viết code
+  này không có Docker daemon (`docker info` báo không kết nối được `docker.sock`). Trước
+  khi coi mục này là hoàn thành, cần người có Docker daemon thật:
+  1. `cp .env.example .env` (điền API key LLM thật) và `cp web/.env.example web/.env`.
+  2. `docker compose up --build`.
+  3. Xác nhận cả 5 container lên khỏe (`docker compose ps`), Web App (`:5173`) gọi được
+     `/api/v1/takeoff` (`:8083`), Worker thực sự nhận và xử lý task (xem log `docker
+     compose logs worker`), tải BOQ Excel về thành công.
+  Rất có khả năng phát sinh lỗi runtime chưa lường trước (permission thư mục volume,
+  thiếu biến môi trường bắt buộc, healthcheck sai lệnh...) chỉ lộ ra khi chạy container
+  thật.
 
 ## 4. Giao tiếp Thời gian thực (Real-time Communication) 🟡
 
@@ -103,33 +125,36 @@ Tài liệu này ghi nhận các giới hạn kỹ thuật hiện tại của d�
   dùng cho hồ sơ thầu. Đây là phần việc lớn cần dữ liệu thực tế, chưa thể tự động hóa
   trong 1 lượt nâng cấp code.
 
-## 6. Mô hình Kinh doanh (SaaS Billing) 🟢
+## 6. Mô hình Kinh doanh (SaaS Billing) 🟢 Chưa làm
 
 - **Tình trạng hiện tại:** Miễn phí và chưa có cơ chế đăng nhập.
 - **Vấn đề (Nợ kỹ thuật):** Chưa thể thu hồi vốn và sinh lời.
-- **Hướng giải quyết (Phase 5):** Tích hợp cổng thanh toán (Stripe / VNPay). Thu phí theo số lượng bản vẽ upload hoặc gói đăng ký (Subscription). Nên làm cùng lúc với xác thực API ở mục 7 — hiện chưa có khái niệm "user" nào ở tầng API để gắn billing vào.
+- **Hướng giải quyết (Phase 5):** Tích hợp cổng thanh toán (Stripe / VNPay). Thu phí theo số lượng bản vẽ upload hoặc gói đăng ký (Subscription). Nên làm cùng lúc với xác thực người dùng thật (JWT/OAuth) — mục 7 chỉ mới có 1 API key CHUNG, chưa có khái niệm "user" riêng để gắn billing vào.
+- **Vì sao chưa trả được:** cần tài khoản Stripe/VNPay thật để tích hợp và kiểm thử — không thể tự đăng ký thay người dùng, và code chưa test được với sandbox chưa cấu hình vẫn là code chưa kiểm chứng.
 
-## 8. Địa chỉ server bị hardcode trong Web App 🟡
+## 8. Địa chỉ server bị hardcode ✅ Đã trả
 
-- **Đã làm:** plugin Revit (`config.json`/`MEP_AGENTS_API_BASE`) và AutoCAD
-  (`MEP_AGENTS_HOME`/`MEP_AGENTS_API_BASE`) đã hết hardcode, đọc cấu hình qua biến môi
-  trường (xem `README_WINDOWS.md` mục 5).
-- **Chưa làm:** `web/src/App.jsx` vẫn hardcode `API_URL = 'http://localhost:8083/api/v1'`
-  và `WS_URL = 'ws://localhost:8083/ws'` ngay trong code — cùng dạng vấn đề vừa sửa ở 2
-  plugin kia nhưng CHƯA áp dụng cho Web App. Khi build production (`npm run build`) trỏ
-  tới domain khác, phải đổi tay 2 hằng số này rồi build lại. Nên đọc qua biến môi trường
-  Vite (`import.meta.env.VITE_API_BASE`, file `.env`/`.env.production`) thay vì hardcode.
+- Plugin Revit (`config.json`/`MEP_AGENTS_API_BASE`) và AutoCAD
+  (`MEP_AGENTS_HOME`/`MEP_AGENTS_API_BASE`) đã hết hardcode từ trước (xem
+  `README_WINDOWS.md` mục 5).
+- **Web App** (`web/src/App.jsx`) trước đây hardcode `http://localhost:8083` — nay đọc qua
+  biến môi trường Vite `VITE_API_BASE`/`VITE_WS_BASE`/`VITE_API_KEY` (`web/.env.example`),
+  không đặt thì vẫn rơi về `localhost:8083` như cũ cho dev. Lưu ý: biến `VITE_*` là
+  build-time (Vite bake vào bundle JS lúc `npm run build`), đổi giá trị sau khi đã build
+  đòi build lại, không đọc được lúc container đang chạy.
 
-## 9. Kiểm thử thật & End-to-End 🟡
+## 9. Kiểm thử thật & End-to-End 🟡 Chưa làm
 
 - **Plugin Revit/AutoCAD chưa từng chạy trong phần mềm thật:** toàn bộ thay đổi ở
-  `revit/` và `autocad/` (kể cả bản nâng cấp gần đây) mới chỉ được kiểm tra bằng
-  `ast.parse`/đọc code, KHÔNG chạy được trong Revit (IronPython + pyRevit) hay AutoCAD
-  (COM) thật vì môi trường phát triển hiện tại không có 2 phần mềm đó cài sẵn. Rủi ro:
-  lỗi runtime đặc thù IronPython 2.7 (VD cú pháp `except Exception, e:` kiểu Python 2,
-  hoặc API `pyrevit.forms` không đúng như kỳ vọng) sẽ không bị bắt cho tới khi người
-  dùng thật chạy thử.
-- **Chưa có test end-to-end toàn luồng:** test hiện tại (`tests/*.py`, 392 test) đều là
+  `revit/` và `autocad/` (kể cả các bản nâng cấp gần đây, bao gồm API key vừa thêm) mới
+  chỉ được kiểm tra bằng `ast.parse`/đọc code, KHÔNG chạy được trong Revit (IronPython +
+  pyRevit) hay AutoCAD (COM) thật vì môi trường phát triển hiện tại không có 2 phần mềm đó
+  cài sẵn. Rủi ro: lỗi runtime đặc thù IronPython 2.7 (VD cú pháp Python 2, hoặc API
+  `pyrevit.forms` không đúng như kỳ vọng) sẽ không bị bắt cho tới khi người dùng thật chạy
+  thử.
+- **`docker-compose.yml` mới (mục 3) cũng thuộc nhóm này** — viết xong nhưng chưa chạy
+  thật, xem chi tiết ở mục 3.
+- **Chưa có test end-to-end toàn luồng:** test hiện tại (`tests/*.py`, 397 test) đều là
   unit/integration test ở mức module Python, mock Celery/Redis. Chưa có kịch bản test
   chạy thật: upload file CAD thật → Celery worker thật (Redis thật) → nhận kết quả Excel
   thật → tải về. Cũng chưa có test UI (Playwright/Cypress) cho `web/`.
