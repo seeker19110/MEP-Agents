@@ -27,10 +27,12 @@ def main():
     if not api_key or api_key == "dummy_key_to_prevent_crash_on_import":
         print("LỖI: Chưa cấu hình OPENAI_API_KEY trong .env.")
         return
-    from src.vectorstore import build_or_load_vectorstore, use_pgvector
+    from src.vectorstore import build_or_load_vectorstore, use_pgvector, ensure_pgvector_hnsw_index
     build_or_load_vectorstore(docs)
     backend = "pgvector" if use_pgvector() else "FAISS"
     print(f"Nạp thành công! Backend vector: {backend}")
+    if use_pgvector():
+        print("HNSW:", ensure_pgvector_hnsw_index())
 
 
 if __name__ == "__main__":
