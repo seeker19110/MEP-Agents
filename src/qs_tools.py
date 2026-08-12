@@ -651,3 +651,53 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
         return f"Lỗi bóc tách khối lượng tự động: {e}"
 
 
+@tool
+def calc_support_hangers(pipe_or_duct_length_m: float, spacing_m: float = 2.0,
+                         support_type: str = "ong", riser_count: int = 0) -> str:
+    """
+    Tính số lượng giá đỡ/ty treo (support/hanger) cho một tuyến ống hoặc ống gió theo chiều
+    dài — hạng mục vật tư phụ trợ thường bị bỏ sót trong BOQ khi chỉ bóc khối lượng đường ống
+    chính (`auto_quantity_takeoff` không tự suy ra số lượng giá đỡ vì phụ thuộc khoảng cách
+    lắp đặt theo quy phạm, không thể đếm trực tiếp từ hình học bản vẽ).
+    Tham số:
+    - pipe_or_duct_length_m: Tổng chiều dài tuyến ống/ống gió cần treo đỡ (m).
+    - spacing_m: Khoảng cách tối đa giữa các giá đỡ (m). Mặc định 2.0m — tham khảo cho ống
+      kim loại cỡ trung bình; ống nhựa/ống nhỏ cần khoảng cách gần hơn (1.0-1.5m), ống gió
+      lớn có thể xa hơn (2.5-3m) — hiệu chỉnh theo quy phạm/catalog nhà sản xuất cụ thể.
+    - support_type: 'ong' (ống nước/gas) hoặc 'ong_gio' (ống gió) — chỉ ảnh hưởng nhãn báo cáo.
+    - riser_count: Số điểm ống đứng (riser) trên tuyến — mỗi điểm cần thêm 1 giá đỡ cố định
+      (clamp) tại mỗi tầng đi qua, cộng thêm vào số giá đỡ ngang.
+    """
+    logger.info(f"Calculating Support Hangers: L={pipe_or_duct_length_m}m, spacing={spacing_m}m")
+    try:
+        if pipe_or_duct_length_m <= 0:
+            return "Lỗi: Chiều dài tuyến phải lớn hơn 0."
+        if spacing_m <= 0:
+            return "Lỗi: Khoảng cách giá đỡ phải lớn hơn 0."
+
+        qty_horizontal = math.ceil(pipe_or_duct_length_m / spacing_m) + 1
+        qty_riser = riser_count if riser_count > 0 else 0
+        qty_total = qty_horizontal + qty_riser
+
+        label = "ống gió" if (support_type or "ong").lower().strip() == "ong_gio" else "ống"
+
+        report = [
+            f"Tính giá đỡ/ty treo cho tuyến {label} dài {pipe_or_duct_length_m} m "
+            f"(khoảng cách tối đa {spacing_m} m/giá đỡ):",
+            f"- Giá đỡ/ty treo ngang theo chiều dài: {qty_horizontal} bộ",
+        ]
+        if qty_riser:
+            report.append(f"- Giá đỡ cố định (clamp) tại điểm ống đứng: {qty_riser} bộ")
+        report += [
+            f"=> TỔNG SỐ GIÁ ĐỠ/TY TREO: {qty_total} bộ",
+            "- Khoảng cách mặc định chỉ mang tính tham khảo — PHẢI đối chiếu quy phạm lắp đặt/"
+            "catalog nhà sản xuất theo cỡ ống/gió thực tế của tuyến trước khi đưa vào BOQ chính "
+            "thức (ống cỡ lớn/ống gió nặng cần giá đỡ dày hơn khoảng cách mặc định).",
+            "- Đây là hạng mục vật tư phụ trợ dễ bị bỏ sót khi lập BOQ nhanh chỉ từ khối lượng "
+            "đường ống chính — nên cộng thêm dòng riêng cho giá đỡ/ty treo vào bảng dự toán.",
+        ]
+        return "\n".join(report)
+    except Exception as e:
+        return f"Lỗi tính giá đỡ/ty treo: {e}"
+
+

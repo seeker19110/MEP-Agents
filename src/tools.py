@@ -1375,22 +1375,28 @@ def lookup_equipment_catalog(equipment_type: str, search_kw: str) -> str:
 from src.hvac_tools import (
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
     calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
+    calc_cooling_tower, calc_fresh_air_ashrae, calc_vrv_outdoor_unit,
 )
 from src.elec_tools import calc_cable_size, calc_breaker_size, calc_lighting_qty
 from src.plumb_tools import (
     calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
     calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
+    calc_vent_pipe, calc_grease_trap, calc_sump_pump,
 )
 from src.ff_tools import calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty
 from src.elec_tools import (
     calc_voltage_drop, calc_total_load, calc_short_circuit,
     calc_cable_tray_size, calc_lightning_protection,
+    calc_emergency_lighting, calc_power_factor_correction,
 )
 from src.hvac_tools import calc_nc_level
 from src.ff_tools import (
     calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
+    calc_gas_suppression, calc_fire_water_tank,
 )
-from src.qs_tools import lookup_unit_price, calc_boq_cost, export_boq_vietnam, auto_quantity_takeoff
+from src.qs_tools import (
+    lookup_unit_price, calc_boq_cost, export_boq_vietnam, auto_quantity_takeoff, calc_support_hangers,
+)
 from src.bim_tools import detect_clashes, read_ifc_model, check_pipe_connectivity
 from src.panel_schedule import generate_panel_schedule
 from src.cad_revision import (
@@ -1404,15 +1410,20 @@ tools = [
     auto_quantity_takeoff, optimize_cad_drawing, standardize_cad_drawing, convert_dwg_to_dxf, add_color_legend,
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
     calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
+    calc_cooling_tower, calc_fresh_air_ashrae, calc_vrv_outdoor_unit,
     calc_cable_size, calc_breaker_size, calc_lighting_qty, calc_voltage_drop,
     calc_total_load, calc_short_circuit, calc_cable_tray_size, calc_lightning_protection,
+    calc_emergency_lighting, calc_power_factor_correction,
     generate_panel_schedule,
     calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
     calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
+    calc_vent_pipe, calc_grease_trap, calc_sump_pump,
     calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty,
     calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
+    calc_gas_suppression, calc_fire_water_tank,
     calc_nc_level,
-    lookup_unit_price, calc_boq_cost, export_boq_vietnam, detect_clashes, read_ifc_model, check_pipe_connectivity,
+    lookup_unit_price, calc_boq_cost, export_boq_vietnam, calc_support_hangers,
+    detect_clashes, read_ifc_model, check_pipe_connectivity,
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
     auto_route_mepf_path, generate_calculation_report, lookup_equipment_catalog, extract_new_blocks_to_library
 ]
@@ -1430,23 +1441,26 @@ TOOLS_BY_ROLE = {
         calc_cooling_load, calc_cooling_load_detailed, calc_duct_size, calc_duct_total_pressure_loss,
         calc_psychrometrics, calc_chw_pipe_size, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
         calc_pump_fan_power, calc_ventilation_rate, calc_nc_level,
+        calc_cooling_tower, calc_fresh_air_ashrae, calc_vrv_outdoor_unit,
     ],
     "electrical": _COMMON_TOOLS + [
         calc_cable_size, calc_breaker_size, calc_lighting_qty, calc_voltage_drop,
         calc_total_load, calc_short_circuit, calc_cable_tray_size, calc_lightning_protection,
-        generate_panel_schedule,
+        generate_panel_schedule, calc_emergency_lighting, calc_power_factor_correction,
     ],
     "plumbing": _COMMON_TOOLS + [
         calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
         calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
+        calc_vent_pipe, calc_grease_trap, calc_sump_pump,
     ],
     "firefighting": _COMMON_TOOLS + [
         calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty,
         calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
+        calc_gas_suppression, calc_fire_water_tank,
     ],
     "qs": _COMMON_TOOLS + [
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, ai_block_recovery,
-        lookup_unit_price, calc_boq_cost, export_boq_vietnam, convert_dwg_to_dxf,
+        lookup_unit_price, calc_boq_cost, export_boq_vietnam, convert_dwg_to_dxf, calc_support_hangers,
     ],
     "cad": _COMMON_TOOLS + [
         read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image,

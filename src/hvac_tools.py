@@ -474,3 +474,165 @@ def calc_nc_level(sound_power_lw: float, room_volume_m3: float, space_type: str 
         return "\n".join(report)
     except Exception as e:
         return f"Lỗi tính NC: {e}"
+
+
+@tool
+def calc_cooling_tower(condenser_heat_rejection_kw: float, wet_bulb_c: float = 28.0,
+                       approach_c: float = 5.0, range_c: float = 5.0) -> str:
+    """
+    Chọn tháp giải nhiệt (Cooling Tower) cho hệ chiller giải nhiệt nước — hạng mục hay bị bỏ
+    sót khi chuỗi tính toán chỉ dừng ở chọn chiller (`calc_chiller_ahu_selection`) mà quên
+    tính tháp giải nhiệt kèm theo cho chiller giải nhiệt nước (water-cooled).
+    Tham số:
+    - condenser_heat_rejection_kw: Nhiệt thải bình ngưng cần giải nhiệt (kW) — thường ước
+      tính bằng công suất lạnh chiller x 1.2÷1.25 (cộng thêm nhiệt tương đương công máy nén).
+    - wet_bulb_c: Nhiệt độ bầu ướt thiết kế ngoài trời (°C, mặc định 28 — cần lấy số liệu khí
+      hậu thực tế của địa phương).
+    - approach_c: Độ chênh Approach — hiệu số giữa nhiệt độ nước lạnh ra tháp và bầu ướt (°C,
+      mặc định 5, thông thường 4-6).
+    - range_c: Độ chênh Range — hiệu số nhiệt độ nước vào/ra tháp (°C, mặc định 5).
+    """
+    logger.info(f"Calculating Cooling Tower: Q={condenser_heat_rejection_kw}kW")
+    try:
+        if condenser_heat_rejection_kw <= 0:
+            return "Lỗi: Nhiệt thải bình ngưng phải lớn hơn 0."
+
+        cold_water_temp_c = wet_bulb_c + approach_c
+        hot_water_temp_c = cold_water_temp_c + range_c
+
+        # Lưu lượng nước giải nhiệt: Q(kW) = m_dot(kg/s) * cp(4.186) * range(°C)
+        flow_kg_s = condenser_heat_rejection_kw / (4.186 * range_c)
+        flow_m3h = flow_kg_s * 3.6
+
+        # Công suất tháp quy đổi ra "tấn tháp" (tower ton, ~3.9 kW/tấn — bao gồm cả nhiệt nén,
+        # lớn hơn 1 tấn lạnh refrigeration ton 3.517 kW).
+        tower_tons = condenser_heat_rejection_kw / 3.9
+
+        return "\n".join([
+            f"Chọn Tháp giải nhiệt (Cooling Tower) — nhiệt thải bình ngưng {condenser_heat_rejection_kw} kW:",
+            f"- Nhiệt độ bầu ướt thiết kế: {wet_bulb_c}°C",
+            f"- Nhiệt độ nước lạnh ra tháp (vào bình ngưng): {cold_water_temp_c:.1f}°C "
+            f"(Approach {approach_c}°C)",
+            f"- Nhiệt độ nước nóng vào tháp (ra bình ngưng): {hot_water_temp_c:.1f}°C "
+            f"(Range {range_c}°C)",
+            f"- Lưu lượng nước giải nhiệt tuần hoàn: {flow_m3h:.1f} m3/h",
+            f"=> CÔNG SUẤT THÁP GIẢI NHIỆT: ~{tower_tons:.1f} tấn tháp (tower ton)",
+            "- Approach càng nhỏ (tháp càng lớn/hiệu quả) thì chiller chạy COP cao hơn nhưng chi "
+            "phí đầu tư tháp tăng — cân đối theo bài toán vòng đời (LCC), Approach 4-6°C phổ biến.",
+            "- Cần tính thêm bơm nước giải nhiệt (dùng `calc_pump_fan_power` với lưu lượng "
+            f"{flow_m3h:.1f} m3/h) và xử lý nước tuần hoàn (chống đóng cặn/rêu tảo) cho tháp hở.",
+        ])
+    except Exception as e:
+        return f"Lỗi tính tháp giải nhiệt: {e}"
+
+
+# Lưu lượng gió tươi tối thiểu theo loại phòng (ASHRAE 62.1, Ventilation Rate Procedure).
+# Rp: L/s trên mỗi người; Ra: L/s trên mỗi m2 diện tích sàn.
+ASHRAE_622_TABLE = {
+    "office": {"Rp": 2.5, "Ra": 0.3, "label": "Văn phòng"},
+    "classroom": {"Rp": 3.8, "Ra": 0.9, "label": "Phòng học"},
+    "conference": {"Rp": 2.5, "Ra": 0.3, "label": "Phòng họp"},
+    "retail": {"Rp": 3.8, "Ra": 0.6, "label": "Bán lẻ/siêu thị"},
+    "restaurant": {"Rp": 3.8, "Ra": 0.9, "label": "Nhà hàng (khu ăn)"},
+    "lobby": {"Rp": 2.5, "Ra": 0.3, "label": "Sảnh/hành lang"},
+    "gym": {"Rp": 10.0, "Ra": 0.3, "label": "Phòng tập gym"},
+}
+
+
+@tool
+def calc_fresh_air_ashrae(occupants: int, area_m2: float, room_type: str = "office") -> str:
+    """
+    Tính lưu lượng gió tươi tối thiểu (khí tươi cấp cho phòng có người) theo phương pháp
+    Ventilation Rate Procedure của ASHRAE 62.1 — tính đủ CẢ hai thành phần (theo số người VÀ
+    theo diện tích sàn), chuẩn xác hơn `calc_ventilation_rate` (chỉ dùng bội số trao đổi khí
+    ACH cố định, không phân biệt loại phòng theo tiêu chuẩn quốc tế).
+    Tham số:
+    - occupants: Số người dự kiến trong phòng.
+    - area_m2: Diện tích sàn phòng (m2).
+    - room_type: Loại phòng — 'office', 'classroom', 'conference', 'retail', 'restaurant',
+      'lobby', 'gym'. Không khớp loại nào thì dùng bảng của 'office'.
+    """
+    logger.info(f"Calculating Fresh Air ASHRAE 62.1: occ={occupants}, area={area_m2}, type={room_type}")
+    try:
+        if occupants < 0 or area_m2 <= 0:
+            return "Lỗi: Diện tích phải lớn hơn 0 và số người không được âm."
+
+        key = (room_type or "office").lower().strip()
+        data = ASHRAE_622_TABLE.get(key, ASHRAE_622_TABLE["office"])
+        matched = key in ASHRAE_622_TABLE
+
+        vbz_people_lps = data["Rp"] * occupants
+        vbz_area_lps = data["Ra"] * area_m2
+        vbz_total_lps = vbz_people_lps + vbz_area_lps
+        vbz_total_m3h = vbz_total_lps * 3.6
+
+        room_type_note = "" if matched else "  (mặc định office - không nhận diện được room_type)"
+        report = [
+            f"Tính gió tươi theo ASHRAE 62.1 ({data['label']}{room_type_note}) — "
+            f"{occupants} người, {area_m2} m2:",
+            f"- Thành phần theo người (Rp = {data['Rp']} L/s/người): {vbz_people_lps:.1f} L/s",
+            f"- Thành phần theo diện tích (Ra = {data['Ra']} L/s/m2): {vbz_area_lps:.1f} L/s",
+            f"=> LƯU LƯỢNG GIÓ TƯƠI TỐI THIỂU (Vbz): {vbz_total_lps:.1f} L/s = {vbz_total_m3h:.0f} m3/h",
+            "- Đây là lưu lượng gió tươi CẤP VÀO phòng (outdoor air), không phải tổng lưu lượng gió "
+            "tuần hoàn của AHU/FCU — dùng giá trị này làm đầu vào chọn AHU có bộ trộn gió tươi hoặc "
+            "hệ thu hồi nhiệt (ERV/HRV) riêng.",
+            "- Với phòng đông người biến động (hội trường, rạp chiếu), cân nhắc điều khiển gió tươi "
+            "theo nồng độ CO2 (Demand Control Ventilation) thay vì cấp cố định theo thiết kế đỉnh.",
+        ]
+        return "\n".join(report)
+    except Exception as e:
+        return f"Lỗi tính gió tươi ASHRAE 62.1: {e}"
+
+
+@tool
+def calc_vrv_outdoor_unit(total_indoor_capacity_kw: float, diversity_factor: float = 0.8,
+                          max_connection_ratio_percent: float = 130.0) -> str:
+    """
+    Chọn công suất dàn nóng (Outdoor Unit) hệ VRV/VRF từ tổng công suất các dàn lạnh (Indoor
+    Units) đã bố trí — hạng mục hay bị bỏ sót khi chuỗi tính toán VRV chỉ dừng ở chọn cỡ ống
+    gas (`calc_refrigerant_pipe_size`) mà quên bước chọn dàn nóng theo hệ số đồng thời thực tế
+    (không phải mọi dàn lạnh đều chạy full tải cùng lúc).
+    Tham số:
+    - total_indoor_capacity_kw: Tổng công suất lạnh danh định của TẤT CẢ dàn lạnh nối vào cùng
+      một dàn nóng/hệ (kW).
+    - diversity_factor: Hệ số đồng thời sử dụng (mặc định 0.8 — 80% dàn lạnh hoạt động full tải
+      cùng lúc là giả định thiết kế phổ biến; công trình có giờ dùng lệch nhau lớn có thể hạ thấp
+      hơn, VD 0.6-0.7).
+    - max_connection_ratio_percent: Tỷ lệ kết nối tối đa cho phép của hãng (dàn lạnh/dàn nóng,
+      mặc định 130% — cần đối chiếu catalog hãng cụ thể vì một số dòng cho phép tới 150-200%).
+    """
+    logger.info(f"Calculating VRV Outdoor Unit: total_indoor={total_indoor_capacity_kw}kW")
+    try:
+        if total_indoor_capacity_kw <= 0:
+            return "Lỗi: Tổng công suất dàn lạnh phải lớn hơn 0."
+        if not (0 < diversity_factor <= 1.5):
+            return "Lỗi: Hệ số đồng thời phải trong khoảng hợp lý (0, 1.5]."
+
+        outdoor_required_kw = total_indoor_capacity_kw * diversity_factor
+        connection_ratio_pct = (total_indoor_capacity_kw / outdoor_required_kw) * 100.0 if outdoor_required_kw > 0 else 0
+
+        report = [
+            f"Chọn Dàn nóng VRV/VRF — tổng công suất dàn lạnh {total_indoor_capacity_kw} kW, "
+            f"hệ số đồng thời {diversity_factor}:",
+            f"=> CÔNG SUẤT DÀN NÓNG TỐI THIỂU CẦN CHỌN: {outdoor_required_kw:.1f} kW "
+            f"(chọn model catalog gần nhất, không thấp hơn giá trị này)",
+            f"- Tỷ lệ kết nối (Connection Ratio) tương ứng: {connection_ratio_pct:.0f}%",
+        ]
+
+        if connection_ratio_pct > max_connection_ratio_percent:
+            report.append(f"- CẢNH BÁO: Tỷ lệ kết nối {connection_ratio_pct:.0f}% VƯỢT giới hạn cho "
+                          f"phép {max_connection_ratio_percent:.0f}% — cần chọn dàn nóng công suất lớn "
+                          f"hơn hoặc giảm hệ số đồng thời (kiểm tra lại giả định vận hành thực tế).")
+        else:
+            report.append(f"- Tỷ lệ kết nối trong giới hạn cho phép ({max_connection_ratio_percent:.0f}%).")
+
+        report += [
+            "- BẮT BUỘC đối chiếu công suất dàn nóng vừa tính với catalog model thật của hãng "
+            "(Daikin/Mitsubishi/LG...) — công suất danh định thường suy giảm theo chiều dài ống gas "
+            "và chênh cao độ dàn nóng/dàn lạnh, cần hiệu chỉnh theo bảng correction factor của hãng.",
+            "- Không vượt quá số lượng dàn lạnh tối đa cho phép trên một hệ (thường 40-64 dàn tùy "
+            "dòng sản phẩm) dù công suất còn dư tỷ lệ kết nối.",
+        ]
+        return "\n".join(report)
+    except Exception as e:
+        return f"Lỗi tính dàn nóng VRV: {e}"

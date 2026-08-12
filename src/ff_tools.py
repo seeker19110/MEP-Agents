@@ -356,3 +356,128 @@ def calc_fire_detector_qty(area_m2: float, height_m: float = 3.0, detector_type:
         return "\n".join(report)
     except Exception as e:
         return f"Lỗi tính đầu báo cháy: {e}"
+
+
+# Nồng độ thiết kế tối thiểu (%) và hệ số thể tích riêng hơi bão hòa s = s0 + k*T (m3/kg) theo
+# NFPA 2001, tại nhiệt độ thiết kế T (°C). Đơn giản hóa cho 2 loại khí sạch phổ biến nhất.
+GAS_AGENT_DATA = {
+    "fm200": {"design_conc": 7.0, "s0": 0.1373, "k": 0.0006, "label": "FM-200 (HFC-227ea)"},
+    "novec1230": {"design_conc": 4.7, "s0": 0.0664, "k": 0.000274, "label": "Novec 1230"},
+}
+# CO2 dùng bảng hệ số ngập tràn (flooding factor, kg/m3) theo NFPA 12 — đơn giản hóa 1 mức trung
+# bình cho không gian kín (phòng máy chủ/phòng điện), thực tế còn phụ thuộc thể tích/tỷ lệ diện
+# tích mở nên cần tra bảng chi tiết khi thiết kế chính thức.
+CO2_FLOODING_FACTOR_KG_M3 = 1.0
+
+
+@tool
+def calc_gas_suppression(room_volume_m3: float, agent_type: str = "fm200",
+                         design_temp_c: float = 20.0) -> str:
+    """
+    Tính lượng khí chữa cháy sạch (Clean Agent) cần thiết cho hệ thống chữa cháy khí tổng
+    ngập (Total Flooding) — dùng cho phòng máy chủ, phòng điện, phòng UPS, kho lưu trữ dữ
+    liệu... nơi KHÔNG thể dùng nước (sprinkler làm hỏng thiết bị điện tử). Đây là hạng mục
+    hay bị bỏ sót khi PCCC chỉ thiết kế sprinkler/hydrant mà quên các phòng kỹ thuật đặc thù
+    bắt buộc dùng khí sạch theo NFPA 2001/TCVN 7161.
+    Tham số:
+    - room_volume_m3: Thể tích phòng cần bảo vệ (m3).
+    - agent_type: 'fm200', 'novec1230', hoặc 'co2'. CO2 gây ngạt chết người ở nồng độ chữa
+      cháy nên chỉ dùng cho không gian không có người thường trực, có quy trình sơ tán/khóa
+      liên động nghiêm ngặt.
+    - design_temp_c: Nhiệt độ thiết kế trong phòng (°C, mặc định 20).
+    """
+    logger.info(f"Calculating Gas Suppression: V={room_volume_m3}m3, agent={agent_type}")
+    try:
+        if room_volume_m3 <= 0:
+            return "Lỗi: Thể tích phòng phải lớn hơn 0."
+
+        key = (agent_type or "fm200").lower().strip()
+        report = [f"HỆ CHỮA CHÁY KHÍ TỔNG NGẬP (Total Flooding) — thể tích phòng {room_volume_m3} m3:"]
+
+        if key == "co2":
+            weight_kg = room_volume_m3 * CO2_FLOODING_FACTOR_KG_M3
+            report += [
+                f"- Chất chữa cháy: CO2 (nồng độ thiết kế tham khảo ~34%, hệ số ngập tràn đơn giản "
+                f"hóa {CO2_FLOODING_FACTOR_KG_M3} kg/m3 theo NFPA 12)",
+                f"=> KHỐI LƯỢNG CO2 CẦN THIẾT: {weight_kg:.1f} kg",
+                "- CẢNH BÁO AN TOÀN: CO2 ở nồng độ chữa cháy GÂY NGẠT CHẾT NGƯỜI. Bắt buộc có chuông/"
+                "đèn cảnh báo trước xả (time delay 20-60s), khóa liên động ngừng thông gió/đóng van "
+                "gió, và quy trình sơ tán toàn bộ nhân sự trước khi khí xả — TCVN 7161-1/NFPA 12.",
+            ]
+        else:
+            agent = GAS_AGENT_DATA.get(key, GAS_AGENT_DATA["fm200"])
+            s = agent["s0"] + agent["k"] * design_temp_c
+            conc = agent["design_conc"]
+            weight_kg = (room_volume_m3 / s) * (conc / (100.0 - conc))
+            report += [
+                f"- Chất chữa cháy: {agent['label']} (nồng độ thiết kế {conc}%, thể tích riêng hơi "
+                f"s = {s:.4f} m3/kg tại {design_temp_c}°C)",
+                f"=> KHỐI LƯỢNG {agent['label'].upper()} CẦN THIẾT: {weight_kg:.1f} kg",
+                "- Thời gian xả khí: TỐI ĐA 10 giây (halocarbon agent) để đạt nồng độ thiết kế trước "
+                "khi cháy lan rộng — NFPA 2001.",
+                "- BẮT BUỘC kiểm tra độ kín phòng (door fan test) sau thi công để đảm bảo nồng độ "
+                "khí duy trì đủ thời gian giữ (hold time) tối thiểu 10 phút, tránh rò rỉ qua khe hở "
+                "cửa/sàn nâng/trần giả.",
+            ]
+
+        report += [
+            "- Hệ khí sạch KHÔNG thay thế đầu báo cháy — vẫn cần đầu báo khói độ nhạy cao "
+            "(`calc_fire_detector_qty`) để kích hoạt xả khí tự động.",
+            "- Với phòng có người thường trực, ưu tiên FM-200/Novec 1230 (an toàn với người ở nồng "
+            "độ thiết kế) thay vì CO2.",
+        ]
+        return "\n".join(report)
+    except Exception as e:
+        return f"Lỗi tính hệ chữa cháy khí: {e}"
+
+
+# Thời gian dự trữ nước chữa cháy tối thiểu (giờ) theo nhóm nguy cơ, tham khảo NFPA 13/TCVN 3890
+# (giá trị đơn giản hóa — công trình có yêu cầu pháp lý cụ thể cần đối chiếu hồ sơ thẩm duyệt PCCC).
+FIRE_WATER_DURATION_HOURS = {"light": 1.0, "ordinary": 1.5, "extra": 2.0}
+
+
+@tool
+def calc_fire_water_tank(hazard_class: str = "ordinary", sprinkler_flow_lps: float = 0.0,
+                         hydrant_flow_lps: float = 0.0, duration_hours: float = 0.0) -> str:
+    """
+    Tính dung tích bể/bồn dự trữ nước chữa cháy — hạng mục hay bị bỏ sót khi đã tính bơm PCCC
+    (`calc_fire_pump`/`calc_standpipe`) nhưng quên tính LƯỢNG NƯỚC dự trữ đủ cho thời gian
+    chữa cháy yêu cầu (bơm đủ công suất nhưng bể cạn nước sau vài phút thì vô nghĩa).
+    Tham số:
+    - hazard_class: 'light', 'ordinary', hoặc 'extra' — quyết định thời gian dự trữ mặc định
+      nếu không truyền duration_hours.
+    - sprinkler_flow_lps: Lưu lượng thiết kế hệ sprinkler (L/s) — lấy từ `calc_sprinkler_hydraulics`.
+    - hydrant_flow_lps: Lưu lượng thiết kế hệ họng nước vách tường (L/s) — lấy từ `calc_standpipe`.
+    - duration_hours: Ghi đè thời gian dự trữ (giờ) nếu có yêu cầu riêng từ hồ sơ thẩm duyệt
+      PCCC; để 0 dùng mặc định theo hazard_class.
+    """
+    logger.info(f"Calculating Fire Water Tank: hazard={hazard_class}")
+    try:
+        if sprinkler_flow_lps <= 0 and hydrant_flow_lps <= 0:
+            return ("Lỗi: Cần ít nhất một trong hai lưu lượng (sprinkler_flow_lps hoặc "
+                    "hydrant_flow_lps) để tính dung tích bể — lấy từ `calc_sprinkler_hydraulics` "
+                    "hoặc `calc_standpipe` trước.")
+
+        duration = duration_hours if duration_hours > 0 else FIRE_WATER_DURATION_HOURS.get(
+            (hazard_class or "ordinary").lower().strip(), 1.5)
+        total_flow_lps = sprinkler_flow_lps + hydrant_flow_lps
+        volume_m3 = total_flow_lps * 3600 * duration / 1000.0
+
+        lines = [f"Tính dung tích bể dự trữ nước chữa cháy (nguy cơ {hazard_class}):"]
+        if sprinkler_flow_lps > 0:
+            lines.append(f"- Lưu lượng sprinkler: {sprinkler_flow_lps:.1f} L/s")
+        if hydrant_flow_lps > 0:
+            lines.append(f"- Lưu lượng họng nước vách tường: {hydrant_flow_lps:.1f} L/s")
+
+        return "\n".join(lines + [
+            f"- Tổng lưu lượng thiết kế: {total_flow_lps:.1f} L/s",
+            f"- Thời gian dự trữ yêu cầu: {duration:.1f} giờ",
+            f"=> DUNG TÍCH BỂ NƯỚC CHỮA CHÁY ĐỀ XUẤT: {volume_m3:.1f} m3",
+            "- Bể nước chữa cháy PHẢI TÁCH RIÊNG khỏi bể nước sinh hoạt (hoặc dùng ngăn riêng có "
+            "van một chiều/ống hút riêng), không được để nước sinh hoạt tiêu hao làm cạn phần dự "
+            "trữ chữa cháy — đây là lỗi hay gặp khi dùng chung một bể cho cả hai mục đích.",
+            "- Vị trí đặt bơm PCCC phải đảm bảo cột hút dương (bể luôn cao hơn hoặc bằng miệng hút "
+            "bơm) — nếu bể ngầm sâu hơn bơm, cần bơm mồi hoặc bố trí bơm chìm.",
+        ])
+    except Exception as e:
+        return f"Lỗi tính bể nước chữa cháy: {e}"
