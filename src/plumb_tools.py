@@ -14,7 +14,8 @@ def calc_water_pipe(fixture_units: float, is_flush_valve: bool = False) -> str:
         else:
             flow_lps = 0.04 * math.pow(fixture_units, 0.65)
             
-        if flow_lps < 0.1: flow_lps = 0.1
+        if flow_lps < 0.1:
+            flow_lps = 0.1
         
         v = 1.2
         area = (flow_lps / 1000) / v
@@ -54,7 +55,7 @@ def calc_water_tank(population: int, liters_per_person: float = 200) -> str:
 @tool
 def calc_plumbing_pump_head(building_height_m: float, longest_pipe_length_m: float) -> str:
     """Tính cột áp bơm cấp nước (Booster pump / Transfer pump)."""
-    logger.info(f"Calculating Plumbing Pump Head")
+    logger.info("Calculating Plumbing Pump Head")
     try:
         static_head = building_height_m
         friction_head = longest_pipe_length_m * 0.1

@@ -78,19 +78,11 @@ def load_unit_prices(csv_path: str = None) -> pl.DataFrame:
 
 def match_unit_price(item_name: str, prices: pl.DataFrame):
     """Tìm đơn giá khớp nhất cho một tên hạng mục.
-    Tích hợp AI Semantic Search bằng FAISS (Vector Database)."""
-    
-    # 1. Semantic Search (Độ chính xác cao nhất qua Ngữ nghĩa)
-    try:
-        faiss_idx = _get_faiss_index(prices)
-        docs = faiss_idx.similarity_search_with_score(item_name, k=1)
-        # Điểm L2 distance càng thấp càng tốt, ngưỡng 0.4 là khá gần
-        if docs and docs[0][1] < 0.4:
-            return docs[0][0].metadata
-    except Exception as e:
-        pass
-        
-    # 2. Rơi về (Fallback) Exact substring match
+
+    Khớp theo từ khóa (substring) trước, rơi về fuzzy matching nếu không tìm thấy —
+    hoạt động offline hoàn toàn, không cần API key/embedding.
+    """
+    # 1. Exact substring match theo từ khóa (tu_khoa)
     name_norm = _norm(item_name)
     best_row, best_score = None, 0
     
@@ -100,7 +92,7 @@ def match_unit_price(item_name: str, prices: pl.DataFrame):
             if kw and kw in name_norm and len(kw) > best_score:
                 best_row, best_score = row, len(kw)
                 
-    # 3. Fuzzy matching nếu không tìm thấy exact
+    # 2. Fuzzy matching nếu không tìm thấy exact
     if best_row is None:
         try:
             from rapidfuzz import fuzz
@@ -417,13 +409,17 @@ def export_boq_vietnam(boq_excel_path: str, output_excel_path: str = "BOQ_mau_ch
     except Exception as e:
         return f"Lỗi xuất BOQ mẫu chuẩn: {e}"
 
-import json
-import math
-import pandas as pd
-from ezdxf import audit
-from src import cad_loader, cad_geometry, cad_standards
-from src.tools import normalize_mepf_parameter_spec
-from src.bim_tools import classify_layer_system
+# Đặt SAU các hàm phía trên (không phải đầu file) vì import `src.tools` ở đây, mà
+# `src.tools` (module cha) lại import ngược từ `qs_tools` ở module-level -> đặt ở đầu
+# file sẽ tạo vòng import khi `qs_tools` được nạp trước `tools`. Xem giải thích tương tự
+# ở `src/api.py`.
+import json  # noqa: E402
+import math  # noqa: E402
+import pandas as pd  # noqa: E402
+from ezdxf import audit  # noqa: E402
+from src import cad_loader, cad_geometry, cad_standards  # noqa: E402
+from src.tools import normalize_mepf_parameter_spec  # noqa: E402
+from src.bim_tools import classify_layer_system  # noqa: E402
 
 @tool
 def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_toan.xlsx",
@@ -779,8 +775,8 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 f"[CẢNH BÁO] {len(ambiguous_labels)} ghi chú kích thước KHÔNG được gán vào tuyến "
                 f"nào vì nằm gần ranh giới giữa 2 hệ khác nhau (VD: {sample}"
                 + (", ..." if len(ambiguous_labels) > 5 else "") +
-                f") — cần đối chiếu bản vẽ thủ công để tránh gán nhầm hệ, thay vì đoán bừa "
-                f"theo layer gần nhất.\n\n"
+                ") — cần đối chiếu bản vẽ thủ công để tránh gán nhầm hệ, thay vì đoán bừa "
+                "theo layer gần nhất.\n\n"
             )
         if duplicate_length_by_layer:
             total_dup_m = sum(duplicate_length_by_layer.values()) / 1000.0
@@ -788,8 +784,8 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 f"[CẢNH BÁO NGHIÊM TRỌNG] Phát hiện hình học TRÙNG LẶP (overkill) ước tính "
                 f"~{total_dup_m:.1f} m bị cộng dồn thừa vào khối lượng, tại các Layer: "
                 + ", ".join(sorted(duplicate_length_by_layer.keys())) + ". "
-                f"Nên chạy `optimize_cad_drawing` để dọn trùng lặp rồi bóc lại khối lượng trước "
-                f"khi dùng bảng dự toán này.\n\n"
+                "Nên chạy `optimize_cad_drawing` để dọn trùng lặp rồi bóc lại khối lượng trước "
+                "khi dùng bảng dự toán này.\n\n"
             )
         if xref_overlap_length > 0:
             total_xref_dup_m = xref_overlap_length / 1000.0
@@ -798,14 +794,14 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 f"giữa nội dung XREF và hình học VẼ TRỰC TIẾP trong bản vẽ chính (khác layer nên "
                 f"KHÔNG bị bắt bởi cảnh báo overkill ở trên), tại các Layer liên quan: "
                 + ", ".join(sorted(xref_overlap_layers)) + ". "
-                f"Thường do khách VẼ LẠI (trace) nội dung xref vào bản vẽ chính khi gộp thủ công "
-                f"nhiều nguồn — kiểm tra kỹ trước khi dùng khối lượng này, có thể đang bị TÍNH ĐÔI.\n\n"
+                "Thường do khách VẼ LẠI (trace) nội dung xref vào bản vẽ chính khi gộp thủ công "
+                "nhiều nguồn — kiểm tra kỹ trước khi dùng khối lượng này, có thể đang bị TÍNH ĐÔI.\n\n"
             )
 
         summary += (
             f"BÓC TÁCH KHỐI LƯỢNG TỰ ĐỘNG THÀNH CÔNG (offline, không cần LLM tính toán).\n"
             f"- Đã làm sạch bản vẽ (Audit sửa {audit_fixes} lỗi).\n"
-            f"- Tổng {len(block_counts)} loại Block (thiết bị) và {len([l for l, v in layer_lengths.items() if v > 0])} tuyến ống/dây có khối lượng.\n"
+            f"- Tổng {len(block_counts)} loại Block (thiết bị) và {len([lyr for lyr, v in layer_lengths.items() if v > 0])} tuyến ống/dây có khối lượng.\n"
             f"- Khối lượng ống/dây đã cộng {wastage_percent:.0f}% hao hụt vật tư theo định mức.\n"
             f"- Đã ghi {len(rows)} dòng dự toán ra file Excel tại: {out_path}\n"
         )

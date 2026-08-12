@@ -3,6 +3,9 @@ import pandas as pd
 from docx import Document
 import os
 import json
+import sys
+import builtins
+from io import StringIO
 from pypdf import PdfReader
 import ezdxf
 from ezdxf import audit
@@ -413,7 +416,7 @@ def write_cad(file_path: str, layers: str) -> str:
     try:
         safe_path = resolve_safe_path(file_path)
         doc = ezdxf.new('R2010')
-        layer_list = [l.strip() for l in layers.split(',') if l.strip()]
+        layer_list = [name.strip() for name in layers.split(',') if name.strip()]
         for layer in layer_list:
             doc.layers.add(name=layer)
 
@@ -421,10 +424,6 @@ def write_cad(file_path: str, layers: str) -> str:
         return f"Đã tạo thành công bản vẽ CAD tại {file_path} với các layers: {', '.join(layer_list)}"
     except Exception as e:
         return f"Lỗi tạo CAD (.dxf): {e}"
-
-import sys
-from io import StringIO
-import builtins
 
 # Sandbox cho execute_python_code: chỉ cho phép các builtin an toàn (không có open/eval/exec/input)
 # và chỉ cho phép import các module cần thiết cho việc dựng Block ezdxf (ezdxf, math, json).
@@ -555,7 +554,7 @@ def ai_block_recovery(file_path: str, layer: str, shape: str, dimensions: str, r
                     try:
                         pts = entity.get_points()
                         px, py = pts[0][0], pts[0][1]
-                    except:
+                    except Exception:
                         pass
 
                 if px is not None and py is not None:
@@ -582,7 +581,7 @@ def ai_block_recovery(file_path: str, layer: str, shape: str, dimensions: str, r
         for e in set(entities_to_delete):
             try:
                 msp.delete_entity(e)
-            except:
+            except Exception:
                 pass
 
         relayered_count = 0
@@ -590,7 +589,7 @@ def ai_block_recovery(file_path: str, layer: str, shape: str, dimensions: str, r
             try:
                 e.dxf.layer = layer
                 relayered_count += 1
-            except:
+            except Exception:
                 pass
             
         for cx, cy in centers:
@@ -835,7 +834,7 @@ def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) ->
                 associations[key]["count"] += 1
                 associations[key]["total_length"] += best_pipe["length"]
 
-        report = f"PHÂN TÍCH NGỮ CẢNH HÌNH HỌC & MŨI TÊN CHỈ DẪN (Spatial Intelligence):\n"
+        report = "PHÂN TÍCH NGỮ CẢNH HÌNH HỌC & MŨI TÊN CHỈ DẪN (Spatial Intelligence):\n"
         report += f"- Tìm thấy {len(texts)} văn bản ghi chú (TEXT/MTEXT), {len(leaders)} mũi tên chỉ dẫn (LEADER), và {len(pipe_segments)} đoạn đường ống.\n\n"
         
         report += "📌 THỐNG KÊ GHI CHÚ VĂN BẢN VÀ MŨI TÊN (Tối đa 20 ghi chú tiêu biểu):\n"
@@ -1002,9 +1001,9 @@ def audit_cad_drawing_errors(file_path: str, text_duplicate_tolerance: float = 1
                 )
 
         if not issues:
-            return (f"KHÔNG phát hiện lỗi phổ biến nào trong bản vẽ. Đã kiểm tra: đơn vị bản vẽ, "
-                    f"đối tượng trên Layer 0, Block lệch tỷ lệ, text trùng lặp, độ nhất quán cỡ "
-                    f"chữ, cao độ Z bất thường.")
+            return ("KHÔNG phát hiện lỗi phổ biến nào trong bản vẽ. Đã kiểm tra: đơn vị bản vẽ, "
+                    "đối tượng trên Layer 0, Block lệch tỷ lệ, text trùng lặp, độ nhất quán cỡ "
+                    "chữ, cao độ Z bất thường.")
 
         report = [f"RÀ SOÁT LỖI BẢN VẼ ({len(issues)} vấn đề phát hiện, chỉ đọc — chưa sửa file):"]
         for note in load_notes:
@@ -1538,37 +1537,42 @@ def lookup_equipment_catalog(equipment_type: str, search_kw: str) -> str:
 
 
 
-from src.hvac_tools import (
+# Đặt sau các hàm phía trên (không phải đầu file) vì `src.qs_tools` import ngược lại
+# `normalize_mepf_parameter_spec` từ chính module này ở module-level — đặt các import
+# này lên đầu file sẽ tạo vòng import khi `tools` được nạp trước khi các hàm nó cần
+# tồn tại. Xem giải thích tương tự ở `src/api.py`.
+from src.hvac_tools import (  # noqa: E402
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
     calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
     calc_cooling_tower, calc_fresh_air_ashrae, calc_vrv_outdoor_unit,
 )
-from src.elec_tools import calc_cable_size, calc_breaker_size, calc_lighting_qty
-from src.plumb_tools import (
+from src.elec_tools import calc_cable_size, calc_breaker_size, calc_lighting_qty  # noqa: E402
+from src.plumb_tools import (  # noqa: E402
     calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
     calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
     calc_vent_pipe, calc_grease_trap, calc_sump_pump,
 )
-from src.ff_tools import calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty
-from src.elec_tools import (
+from src.ff_tools import calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty  # noqa: E402
+from src.elec_tools import (  # noqa: E402
     calc_voltage_drop, calc_total_load, calc_short_circuit,
     calc_cable_tray_size, calc_lightning_protection,
     calc_emergency_lighting, calc_power_factor_correction,
 )
-from src.hvac_tools import calc_nc_level
-from src.ff_tools import (
+from src.hvac_tools import calc_nc_level  # noqa: E402
+from src.ff_tools import (  # noqa: E402
     calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
     calc_gas_suppression, calc_fire_water_tank,
 )
-from src.qs_tools import (
+from src.qs_tools import (  # noqa: E402
     lookup_unit_price, calc_boq_cost, export_boq_vietnam, auto_quantity_takeoff, calc_support_hangers,
-    build_revit_boq_excel,
+    build_revit_boq_excel,  # noqa: F401 — re-export: src/api.py nạp qua đây để tránh vòng import (xem comment ở đó)
 )
-from src.bim_tools import detect_clashes, read_ifc_model, check_pipe_connectivity
-from src.panel_schedule import generate_panel_schedule
-from src.cad_revision import (
+from src.bim_tools import detect_clashes, read_ifc_model, check_pipe_connectivity  # noqa: E402
+from src.panel_schedule import generate_panel_schedule  # noqa: E402
+from src.cad_revision import (  # noqa: E402
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
 )
+from src.vision_tools import detect_cad_symbols_yolo  # noqa: E402
 
 tools = [
     search_standards, search_web, calculate, execute_python_code, list_directory,
@@ -1593,7 +1597,8 @@ tools = [
     lookup_unit_price, calc_boq_cost, export_boq_vietnam, calc_support_hangers,
     detect_clashes, read_ifc_model, check_pipe_connectivity,
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
-    auto_route_mepf_path, generate_calculation_report, lookup_equipment_catalog, extract_new_blocks_to_library
+    auto_route_mepf_path, generate_calculation_report, lookup_equipment_catalog, extract_new_blocks_to_library,
+    detect_cad_symbols_yolo,
 ]
 
 # Giảm token: trước đây MỌI agent đều bị bind cả danh sách `tools` đầy đủ (30+ schema),
@@ -1629,18 +1634,20 @@ TOOLS_BY_ROLE = {
     "qs": _COMMON_TOOLS + [
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, ai_block_recovery,
         lookup_unit_price, calc_boq_cost, export_boq_vietnam, convert_dwg_to_dxf, calc_support_hangers,
+        render_cad_image, detect_cad_symbols_yolo,
     ],
     "cad": _COMMON_TOOLS + [
         read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image,
         analyze_cad_spatial_context, execute_python_code, optimize_cad_drawing,
         standardize_cad_drawing, auto_route_mepf_path, extract_new_blocks_to_library,
         snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
-        convert_dwg_to_dxf, add_color_legend, audit_cad_drawing_errors,
+        convert_dwg_to_dxf, add_color_legend, audit_cad_drawing_errors, detect_cad_symbols_yolo,
     ],
     "bim": _COMMON_TOOLS + [
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, detect_clashes,
         check_pipe_connectivity, read_ifc_model,
         diff_cad_revisions, list_cad_revisions, convert_dwg_to_dxf, audit_cad_drawing_errors,
+        render_cad_image, detect_cad_symbols_yolo,
     ],
 }
 

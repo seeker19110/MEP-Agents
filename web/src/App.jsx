@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 
 const API_URL = 'http://localhost:8083/api/v1';
+const WS_URL = 'ws://localhost:8083/ws';
 
 function App() {
   const [file, setFile] = useState(null);
@@ -42,35 +43,41 @@ function App() {
     }
   };
 
+  // Trước đây dùng setInterval polling HTTP mỗi 1.5s (tốn round-trip + độ trễ tới 1.5s).
+  // Nay mở 1 kết nối WebSocket duy nhất tới `/ws/task/{taskId}` (src/api.py), server chỉ
+  // đẩy dữ liệu khi trạng thái thay đổi thật và tự đóng kết nối khi tác vụ xong.
   useEffect(() => {
-    let interval;
-    if (taskId && taskStatus !== 'success') {
-      interval = setInterval(async () => {
-        try {
-          const res = await axios.get(`${API_URL}/task/${taskId}`);
-          setTaskStatus(res.data.status);
-          
-          if (res.data.logs) {
-            setLogs(prev => {
-              const newLogs = [...prev];
-              res.data.logs.forEach(l => {
-                if (!newLogs.includes(l)) newLogs.push(l);
-              });
-              return newLogs;
-            });
-          }
+    if (!taskId || taskStatus === 'success') return undefined;
 
-          if (res.data.status === 'success') {
-            setIsUploading(false);
-            clearInterval(interval);
-            setLogs(prev => [...prev, "✅ Hoàn tất! Bảng BOQ đã sẵn sàng."]);
-          }
-        } catch (error) {
-          console.error("Polling error", error);
-        }
-      }, 1500);
-    }
-    return () => clearInterval(interval);
+    const ws = new WebSocket(`${WS_URL}/task/${taskId}`);
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setTaskStatus(data.status);
+
+      if (data.logs) {
+        setLogs(prev => {
+          const newLogs = [...prev];
+          data.logs.forEach(l => {
+            if (!newLogs.includes(l)) newLogs.push(l);
+          });
+          return newLogs;
+        });
+      }
+
+      if (data.status === 'success') {
+        setIsUploading(false);
+        setLogs(prev => [...prev, "✅ Hoàn tất! Bảng BOQ đã sẵn sàng."]);
+      } else if (data.status === 'error') {
+        setIsUploading(false);
+      }
+    };
+
+    ws.onerror = () => {
+      console.error("WebSocket lỗi kết nối tới máy chủ trạng thái tác vụ.");
+    };
+
+    return () => ws.close();
   }, [taskId, taskStatus]);
 
   const handleDownload = () => {
@@ -176,7 +183,7 @@ function App() {
             {isUploading && (
               <motion.div animate={{opacity:[0.3, 1, 0.3]}} transition={{repeat:Infinity, duration:1.5}} className="flex gap-3 text-cyan-500">
                 <span className="text-slate-600 shrink-0">[{new Date().toLocaleTimeString()}]</span>
-                <span>Polling FastAPI Celery Worker...</span>
+                <span>Đang lắng nghe WebSocket từ Celery Worker...</span>
               </motion.div>
             )}
           </div>

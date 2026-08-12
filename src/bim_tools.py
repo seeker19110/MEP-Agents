@@ -504,10 +504,6 @@ def read_ifc_model(file_path: str, output_excel_path: str = "ifc_report.xlsx") -
             name = entity.Name or ""
             entity_type = entity.is_a()
 
-            # Extract quantites if available
-            length = ""
-            area = ""
-            volume = ""
             # Một số thuộc tính cơ bản
             properties = {}
             for relDefinesByProperties in entity.IsDefinedBy:

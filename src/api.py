@@ -1,7 +1,8 @@
+import asyncio
 import os
 import uuid
 import aiofiles
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -31,6 +32,9 @@ app.add_middleware(
 
 UPLOAD_DIR = os.path.join(get_project_root(), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Alias thay vì gọi `asyncio.sleep` trực tiếp trong `ws_task_status` — xem comment ở đó.
+_WS_POLL_SLEEP = asyncio.sleep
 
 class TaskResponse(BaseModel):
     task_id: str
@@ -70,19 +74,65 @@ async def upload_and_takeoff(file: UploadFile = File(...)):
         message=f"File {file.filename} đã được đưa vào hàng đợi xử lý phân tán. Dùng task_id để theo dõi."
     )
 
-@app.get("/api/v1/task/{task_id}")
-def get_task_status(task_id: str):
-    task_result = AsyncResult(task_id, app=celery_app)
-    if task_result.state == 'PENDING':
-        return {"status": "Processing", "logs": ["Đang khởi tạo Swarm...", "Mechanical: Đang phân tích ống gió..."]}
-    elif task_result.state != 'FAILURE':
+def _task_status_payload(task_result: AsyncResult) -> dict:
+    """Chuyển state Celery thành payload trạng thái cho client (dùng chung cho endpoint
+    HTTP polling cũ và WebSocket real-time mới bên dưới).
+
+    Trước đây `elif task_result.state != 'FAILURE'` coi MỌI state khác PENDING/FAILURE là
+    'success' — hoạt động "đúng" chỉ vì trước giờ Celery task này không bao giờ phát ra
+    state nào khác ngoài PENDING/SUCCESS/FAILURE. Từ khi `parse_cad_to_db_task` phát thêm
+    state PROGRESS (xem `src/celery_app.py`), logic cũ sẽ báo "success" giả trong lúc tác
+    vụ còn đang chạy. Ở đây so khớp state tường minh để không còn phụ thuộc ngầm định đó.
+    """
+    state = task_result.state
+    if state == 'SUCCESS':
         return {
             "status": "success",
             "logs": ["Phân tích hoàn tất", "Bảng BOQ đã sẵn sàng."],
-            "result": task_result.result
+            "result": task_result.result,
         }
-    else:
+    if state == 'FAILURE':
         return {"status": "error", "logs": [str(task_result.info)]}
+    if state == 'PROGRESS':
+        meta = task_result.info if isinstance(task_result.info, dict) else {}
+        return {"status": "Processing", "logs": meta.get("logs") or ["Đang xử lý..."]}
+    # PENDING/STARTED/RETRY hoặc state tương lai khác: vẫn coi là đang xử lý.
+    return {"status": "Processing", "logs": ["Đang khởi tạo Swarm...", "Mechanical: Đang phân tích ống gió..."]}
+
+
+@app.get("/api/v1/task/{task_id}")
+def get_task_status(task_id: str):
+    task_result = AsyncResult(task_id, app=celery_app)
+    return _task_status_payload(task_result)
+
+
+@app.websocket("/ws/task/{task_id}")
+async def ws_task_status(websocket: WebSocket, task_id: str):
+    """Đẩy trạng thái tác vụ Celery real-time qua WebSocket thay vì để client tự polling
+    HTTP mỗi 1.5s (xem `TECH_DEBT.md` mục 4). Server vẫn kiểm tra Redis/Celery backend theo
+    chu kỳ ngắn ở phía trong (Celery result backend không có cơ chế push sẵn), nhưng CLIENT
+    chỉ mở đúng 1 kết nối và chỉ nhận dữ liệu khi có thay đổi thật, thay vì tạo lại 1 HTTP
+    request driver mỗi lần polling. Tự đóng kết nối khi tác vụ xong (success/error).
+    """
+    await websocket.accept()
+    task_result = AsyncResult(task_id, app=celery_app)
+    last_payload = None
+    try:
+        while True:
+            payload = _task_status_payload(task_result)
+            if payload != last_payload:
+                await websocket.send_json(payload)
+                last_payload = payload
+            if payload["status"] in ("success", "error"):
+                break
+            # Alias riêng (thay vì gọi `asyncio.sleep` trực tiếp) để test có thể patch
+            # đúng lệnh chờ của endpoint này mà không đụng tới `asyncio.sleep` toàn cục —
+            # nhiều thứ khác trong ASGI stack (TestClient/anyio) cũng gọi `asyncio.sleep`
+            # nội bộ để nhường CPU, nên patch toàn cục sẽ ảnh hưởng luôn cả những lệnh đó.
+            await _WS_POLL_SLEEP(1.0)
+    except WebSocketDisconnect:
+        return
+    await websocket.close()
 
 @app.get("/api/v1/download/{task_id}")
 def download_boq(task_id: str):

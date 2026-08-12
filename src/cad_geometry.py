@@ -248,14 +248,16 @@ def _process_fittings_for_layer(args):
         for i, a in enumerate(segs):
             px, py, _ = a["start"]
             for j in idx.intersection((px - tolerance, py - tolerance, px + tolerance, py + tolerance)):
-                if i == j: continue
+                if i == j:
+                    continue
                 if _point_on_segment_interior(a["start"], segs[j]["start"], segs[j]["end"], tolerance):
                     tees += 1
                     break
             else: # if no tee at start, check end
                 px, py, _ = a["end"]
                 for j in idx.intersection((px - tolerance, py - tolerance, px + tolerance, py + tolerance)):
-                    if i == j: continue
+                    if i == j:
+                        continue
                     if _point_on_segment_interior(a["end"], segs[j]["start"], segs[j]["end"], tolerance):
                         tees += 1
                         break
@@ -367,7 +369,6 @@ def _subdivide_bulge(x1, y1, x2, y2, bulge, n=8):
     cx, cy = mx + sign * nx * dist_to_center, my + sign * ny * dist_to_center
 
     a1 = math.atan2(y1 - cy, x1 - cx)
-    a2 = math.atan2(y2 - cy, x2 - cx)
     sweep = theta if bulge > 0 else -theta
     points = []
     for i in range(n + 1):

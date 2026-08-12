@@ -1,5 +1,4 @@
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
-from langchain_openai import ChatOpenAI
 from src.state import AgentState, RESET
 from src.config import settings
 from src.usage import record_usage
@@ -441,7 +440,7 @@ Nếu thông tin sai kỹ thuật hoặc thiếu căn cứ, hãy REJECT.""")
 
         if review_result.decision == "REJECT":
             return _reject(review_result.reason)
-        response = AIMessage(content=f"[Reviewer Agent] PHÊ DUYỆT: Phương án kỹ thuật hợp lệ.", name="ReviewerAgent")
+        response = AIMessage(content="[Reviewer Agent] PHÊ DUYỆT: Phương án kỹ thuật hợp lệ.", name="ReviewerAgent")
         return {"messages": [response], "errors": [], "retry_count": 0}
     except Exception as e:
         # Không được ngầm coi lỗi kết nối/parsing là "PHÊ DUYỆT" (fail-open che giấu sự cố
