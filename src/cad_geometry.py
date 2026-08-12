@@ -121,20 +121,44 @@ def arc_entity_length(entity) -> float:
 _CURVE_FLATTENING_RATIO = 0.001
 
 
+def _curve_span(entity) -> float:
+    """Kích thước đặc trưng của một đường cong, làm mốc chọn độ mịn xấp xỉ.
+
+    Với ELLIPSE phải lấy ĐỘ DÀI VECTƠ trục lớn, không phải thành phần X của nó: ellipse
+    xoay đứng có `major_axis = (0, r, 0)` nên lấy thành phần X sẽ ra 0, kéo độ mịn xuống
+    gần 0 và làm ezdxf đệ quy tới lỗi — ngoại lệ đó bị nuốt và cả tuyến ellipse đo ra
+    **0 m** mà không có dấu hiệu gì.
+    """
+    if entity.dxftype() == "ELLIPSE":
+        try:
+            major = entity.dxf.major_axis
+            z = major[2] if len(major) > 2 else 0.0
+            return 2.0 * math.sqrt(major[0] ** 2 + major[1] ** 2 + z ** 2)
+        except Exception:
+            return 0.0
+    # SPLINE có thể được định nghĩa bằng điểm điều khiển HOẶC bằng điểm đi qua (fit
+    # points) — `add_spline` của ezdxf dùng loại thứ hai và để `control_points` rỗng.
+    # Chỉ đọc `control_points` là ra kích thước 0 cho phần lớn spline thực tế.
+    points = []
+    for attribute in ("control_points", "fit_points"):
+        try:
+            points = list(getattr(entity, attribute, []) or [])
+        except Exception:
+            points = []
+        if len(points) >= 2:
+            break
+    if len(points) < 2:
+        return 0.0
+    return math.hypot(max(p[0] for p in points) - min(p[0] for p in points),
+                      max(p[1] for p in points) - min(p[1] for p in points))
+
+
 def _flattened_points(entity):
     """Điểm xấp xỉ của một đường cong tự do (SPLINE/ELLIPSE) theo độ mịn tương đối."""
-    try:
-        points = [(p[0], p[1], p[2] if len(p) > 2 else 0.0)
-                  for p in entity.control_points] if entity.dxftype() == "SPLINE" else []
-    except Exception:
-        points = []
-    if points:
-        span = max(max(p[i] for p in points) - min(p[i] for p in points) for i in (0, 1))
-    else:
-        span = float(getattr(entity.dxf, "major_axis", (1.0, 0.0, 0.0))[0] or 1.0) * 2
-    distance = abs(span) * _CURVE_FLATTENING_RATIO
+    distance = _curve_span(entity) * _CURVE_FLATTENING_RATIO
     if distance <= 0:
-        distance = 1e-6
+        # Đường cong suy biến (trục lớn bằng 0, thiếu điểm điều khiển): không có gì để đo.
+        return []
     return [(p[0], p[1], p[2] if len(p) > 2 else 0.0) for p in entity.flattening(distance)]
 
 
@@ -634,7 +658,8 @@ def _minsert_offsets(entity, rotation_deg):
     return offsets
 
 
-def explode_insert(entity, doc, max_depth: int = 8, _depth: int = 0):
+def explode_insert(entity, doc, max_depth: int = 8, min_run_length: float = 0.0,
+                   _depth: int = 0):
     """Nội dung THẬT bên trong một INSERT: `(segments, nested_inserts)`.
 
     Hồ sơ MEPF thực tế đóng gói rất nhiều thứ thành Block: một cụm WC, một dàn đèn, một
@@ -649,6 +674,11 @@ def explode_insert(entity, doc, max_depth: int = 8, _depth: int = 0):
 
     XREF được bỏ qua ở đây vì đã có đường xử lý riêng (`cad_loader.resolve_xref_segments`),
     gộp cả hai sẽ tính đôi.
+
+    `min_run_length` là ngưỡng coi hình học bên trong một block lồng là TUYẾN THẬT chứ
+    không phải nét vẽ ký hiệu. Phải áp ở đây chứ không chỉ ở ngoài cùng, nếu không cùng
+    một cái đèn sẽ bị loại khi chèn thẳng ra bản vẽ nhưng lại được cộng vào chiều dài ống
+    khi nó nằm trong một block khác — hai đường đi cho hai kết quả khác nhau.
 
     `nested_inserts` là danh sách `(tên block, số lượng)` của thiết bị nằm trong block, để
     hàm gọi cộng vào bảng đếm thiết bị.
@@ -675,7 +705,10 @@ def explode_insert(entity, doc, max_depth: int = 8, _depth: int = 0):
         effective_layer = host_layer if child_layer == "0" else child_layer
 
         if child.dxftype() == "INSERT":
-            sub_segments, sub_inserts = explode_insert(child, doc, max_depth, _depth + 1)
+            sub_segments, sub_inserts = explode_insert(child, doc, max_depth,
+                                                       min_run_length, _depth + 1)
+            if sum(seg["length"] for seg in sub_segments) < min_run_length:
+                sub_segments = []   # nét vẽ ký hiệu, không phải tuyến
             # Mỗi INSERT lồng bên trong là một thiết bị được chèn thật, đếm nó y như một
             # INSERT ở modelspace (nhân theo lưới MINSERT của chính nó).
             child_name, _ = effective_block_name(child, doc)

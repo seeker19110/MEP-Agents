@@ -1,6 +1,6 @@
 # Hồ sơ rà soát sai lệch: bản vẽ → bóc khối lượng
 
-Ghi lại kết quả đợt rà soát tại PR #22 (6 đợt, 19 nguồn sai lệch). Mục đích của file này
+Ghi lại kết quả đợt rà soát tại PR #22 (6 đợt, 19 nguồn) và bộ test bất biến bổ sung sau đó (thêm 3 nguồn). Mục đích của file này
 là để **lần rà sau không phải làm lại từ đầu**: biết chỗ nào đã rà sạch, chỗ nào cố ý
 không sửa và vì sao, chỗ nào còn nợ.
 
@@ -18,7 +18,7 @@ Quy trình dùng cho đợt này: [`PROMPT_RA_SOAT_SAI_LECH.md`](PROMPT_RA_SOAT_
 4. **Bóc thiếu âm thầm nguy hiểm hơn bóc thừa có cảnh báo.** Khi phải chọn, giữ lại dòng
    và đánh dấu, chứ không tự loại.
 
-## 19 nguồn sai lệch đã xử lý
+## 22 nguồn sai lệch đã xử lý
 
 | # | Nguồn sai lệch | Hậu quả | Nơi sửa |
 |---|---|---|---|
@@ -41,10 +41,13 @@ Quy trình dùng cho đợt này: [`PROMPT_RA_SOAT_SAI_LECH.md`](PROMPT_RA_SOAT_
 | 17 | 4 chỗ tạo DXF khai sai đơn vị | File tự ghi đọc lại sai 1000 lần | `tools.py`, `panel_schedule.py`, `create_library.py` |
 | 18 | Thư viện block khai 600×600 **mét** | Sai lan sang mọi bản vẽ dùng nó | `data/blocks/mepf_library.dxf` |
 | 19 | Luồng Revit thiếu cột `Hệ` | Hai luồng hết đối chiếu được | `qs_tools._revit_system` |
+| 20 | ELLIPSE nằm nghiêng đo ra 0 m | Thiếu trọn vẹn tuyến ellipse | `cad_geometry._curve_span` |
+| 21 | Ngưỡng lọc nét ký hiệu không áp cho block lồng | Thừa nét ký hiệu trong block lồng | `cad_geometry.explode_insert` |
+| 22 | SPLINE định nghĩa bằng fit points ra kích thước 0 | Thiếu (chỉ lộ khi refactor) | `cad_geometry._curve_span` |
 
 Test tương ứng: `tests/test_takeoff_units_and_blocks.py`,
 `test_takeoff_curve_and_block_naming.py`, `test_takeoff_system_and_double_line.py`,
-`test_takeoff_fittings_and_labels.py`.
+`test_takeoff_fittings_and_labels.py`, `test_takeoff_invariants.py`.
 
 ## Đã rà, KHÔNG có lỗi — lần sau khỏi rà lại
 
@@ -57,6 +60,17 @@ Test tương ứng: `tests/test_takeoff_units_and_blocks.py`,
   nên việc thêm cột `Hệ` không làm vỡ chúng.
 - **Chuỗi đầy đủ** `auto_quantity_takeoff` → `calc_boq_cost` → `export_boq_vietnam` đã
   chạy thông trên bản vẽ có đủ ống nước, ống gió, máng cáp, đèn và nền kiến trúc.
+
+## Bài học: bất biến và test theo ca là hai lưới khác nhau, cần cả hai
+
+Khi sửa nguồn #20, tôi refactor `_curve_span` và vô tình làm SPLINE dạng fit points ra
+kích thước 0 (nguồn #22). **Toàn bộ 10 test bất biến vẫn pass** — vì spline đo 0 m ở cả
+bản vẽ gốc lẫn bản vẽ đã xoay, nên bất biến "xoay không đổi kết quả" vẫn đúng. Thứ bắt
+được lỗi là test theo ca cụ thể (`test_spline_route_is_measured`, kỳ vọng đúng 8.0 m).
+
+Bất biến kiểm tra tính NHẤT QUÁN, không kiểm tra tính ĐÚNG: một cài đặt sai đều nhau ở
+mọi phía vẫn thoả mãn mọi bất biến. Test theo ca neo kết quả vào một con số tính tay
+được. Bỏ loại nào cũng để lọt một lớp lỗi.
 
 ## Cân nhắc nhưng KHÔNG làm — kèm lý do
 
@@ -90,10 +104,10 @@ Rà lại bảng này mỗi khi đổi logic hình học. Cột cuối là đi�
 
 ## Còn nợ — việc nên làm ở đợt sau
 
-1. **Bộ test bất biến** (ưu tiên cao nhất). 19 nguồn trên đều được bắt bằng test theo
-   từng ca cụ thể. Test bất biến bắt được cả những ca chưa ai nghĩ tới — xem bảng ánh xạ
-   trong `PROMPT_RA_SOAT_SAI_LECH.md`. Bốn bất biến đáng viết trước:
-   đổi đơn vị, xoay/lật toàn bộ bản vẽ, dữ liệu lồng nhau = trải phẳng, ghi ra rồi đọc lại.
+1. ~~**Bộ test bất biến**~~ — ĐÃ LÀM: `tests/test_takeoff_invariants.py` (10 test phủ 5
+   nhóm bất biến: đơn vị, phép dời hình, lồng/phẳng, cộng tính, lũy đẳng). Ngay lần chạy
+   đầu đã bắt được **nguồn #20 và #21** — cả hai đều là lỗi "sai âm thầm" mà 6 đợt rà thủ
+   công trước đó không thấy.
 2. **Đo coverage** phần `cad_geometry` / `qs_tools` để tìm nhánh chưa bao giờ chạy.
 3. **Chạy trên hồ sơ thật của khách** (đợt này mới chỉ chạy dữ liệu tổng hợp và file
    thư viện block của chính dự án).

@@ -659,7 +659,8 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                             texts.append({"text": spec,
                                           "pos": (entity.dxf.insert.x, entity.dxf.insert.y)})
 
-                inner_segments, inner_inserts = cad_geometry.explode_insert(entity, doc)
+                inner_segments, inner_inserts = cad_geometry.explode_insert(
+                    entity, doc, min_run_length=significant_block_length_du)
                 inner_length = sum(s["length"] for s in inner_segments)
                 if inner_length >= significant_block_length_du:
                     # Ngưỡng độ dài: nét vẽ của một KÝ HIỆU (van, đèn, ổ cắm) chỉ dài vài
