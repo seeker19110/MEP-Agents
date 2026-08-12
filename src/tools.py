@@ -415,7 +415,10 @@ def write_cad(file_path: str, layers: str) -> str:
     logger.info("Writing CAD: %s", file_path)
     try:
         safe_path = resolve_safe_path(file_path)
-        doc = ezdxf.new('R2010')
+        # units=4: khai rõ bản vẽ theo MILIMET — `ezdxf.new()` mặc định khai MÉT
+        # ($INSUNITS=6) trong khi toàn bộ dự án vẽ theo mm. Khai sai đơn vị thì chính
+        # file này khi được `auto_quantity_takeoff` đọc lại sẽ ra khối lượng sai 1000 lần.
+        doc = ezdxf.new('R2010', units=4)
         layer_list = [name.strip() for name in layers.split(',') if name.strip()]
         for layer in layer_list:
             doc.layers.add(name=layer)
@@ -754,13 +757,8 @@ def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) ->
             dxftype = entity.dxftype()
             layer = entity.dxf.layer
             
-            if dxftype == 'TEXT':
-                t_str = normalize_pipe_diameter_spec(entity.dxf.text.strip())
-                pos = entity.dxf.insert
-                if t_str:
-                    texts.append({"text": t_str, "pos": (pos.x, pos.y), "layer": layer})
-            elif dxftype == 'MTEXT':
-                t_str = normalize_pipe_diameter_spec(entity.text.strip())
+            if dxftype in ('TEXT', 'MTEXT'):
+                t_str = normalize_pipe_diameter_spec(cad_geometry.plain_entity_text(entity))
                 pos = entity.dxf.insert
                 if t_str:
                     texts.append({"text": t_str, "pos": (pos.x, pos.y), "layer": layer})
@@ -854,11 +852,9 @@ def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) ->
     except Exception as e:
         return f"Lỗi phân tích ngữ cảnh không gian CAD: {e}"
 
-# Bản đồ mã INSUNITS (DXF group code $INSUNITS) sang tên đơn vị dễ đọc.
-_INSUNITS_NAMES = {
-    0: "Không xác định (Unitless)", 1: "Inch", 2: "Feet", 4: "Millimet (mm)",
-    5: "Centimet (cm)", 6: "Met (m)", 8: "Microinch", 9: "Mil",
-}
+# Bản đồ mã INSUNITS (DXF group code $INSUNITS) sang tên đơn vị dễ đọc. Dùng chung một
+# nguồn với `src/cad_units.py` để hai chỗ không mô tả cùng một mã bằng hai cái tên khác nhau.
+from src.cad_units import INSUNITS_NAMES as _INSUNITS_NAMES  # noqa: E402
 
 
 @tool
@@ -896,13 +892,25 @@ def audit_cad_drawing_errors(file_path: str, text_duplicate_tolerance: float = 1
 
         # 1. Đơn vị bản vẽ.
         insunits = doc.header.get('$INSUNITS', 0)
-        if insunits != 4:
-            unit_name = _INSUNITS_NAMES.get(insunits, f"Mã INSUNITS={insunits} (không xác định)")
+        unit_name = _INSUNITS_NAMES.get(insunits, f"Mã INSUNITS={insunits} (không xác định)")
+        if insunits == 0:
+            # Unitless là trường hợp NGUY HIỂM THẬT: không có gì để quy đổi theo, nên
+            # `auto_quantity_takeoff` buộc phải tạm coi là mm.
             issues.append(
-                f"[NGHIÊM TRỌNG] Đơn vị bản vẽ hiện là '{unit_name}', KHÔNG PHẢI Millimet (mm). "
-                f"Toàn bộ hệ thống giả định bản vẽ vẽ bằng mm — nếu khách thực sự vẽ bằng đơn vị "
-                f"khác, MỌI kích thước/khối lượng tính từ bản vẽ này đều SAI LỆCH. Cần hỏi lại "
-                f"khách đơn vị vẽ thực tế trước khi xử lý tiếp."
+                "[NGHIÊM TRỌNG] Bản vẽ KHÔNG khai báo đơn vị ($INSUNITS=0). Bóc khối lượng sẽ "
+                "phải tạm coi bản vẽ vẽ bằng mm; nếu khách vẽ bằng đơn vị khác thì MỌI kích "
+                "thước/khối lượng đều sai theo tỷ lệ chênh lệch. Hỏi lại khách đơn vị vẽ thực "
+                "tế, rồi truyền `drawing_unit` khi gọi `auto_quantity_takeoff`."
+            )
+        elif insunits != 4:
+            # Khai rõ đơn vị khác mm KHÔNG còn là lỗi tính toán — `auto_quantity_takeoff`
+            # quy đổi đúng theo header. Vẫn nêu ra vì hồ sơ MEPF Việt Nam quen dùng mm và
+            # đơn vị lạ thường là dấu hiệu file đi qua nhiều lần convert.
+            issues.append(
+                f"[LƯU Ý] Đơn vị bản vẽ là '{unit_name}', không phải Millimet (mm) theo thông lệ "
+                f"hồ sơ MEPF Việt Nam. Khối lượng vẫn được quy đổi ĐÚNG theo đơn vị này, nhưng "
+                f"nên xác nhận với khách rằng header phản ánh đúng đơn vị đã vẽ — header sai là "
+                f"chuyện thường gặp sau vài lần convert file."
             )
 
         # 2. Vẽ trực tiếp trên Layer "0".
@@ -939,10 +947,8 @@ def audit_cad_drawing_errors(file_path: str, text_duplicate_tolerance: float = 1
         text_entries = []
         for entity in msp:
             dxftype = entity.dxftype()
-            if dxftype == "TEXT":
-                txt, pos = (entity.dxf.text or "").strip(), entity.dxf.insert
-            elif dxftype == "MTEXT":
-                txt, pos = (entity.text or "").strip(), entity.dxf.insert
+            if dxftype in ("TEXT", "MTEXT"):
+                txt, pos = cad_geometry.plain_entity_text(entity), entity.dxf.insert
             else:
                 continue
             if txt:
@@ -1427,7 +1433,8 @@ def extract_new_blocks_to_library(file_path: str) -> str:
         
         library_path = os.path.join(get_project_root(), "data", "blocks", "mepf_library.dxf")
         if not os.path.exists(library_path):
-            lib_doc = ezdxf.new()
+            # units=4: thư viện block vẽ theo mm, phải khai đúng (xem ghi chú ở write_cad).
+            lib_doc = ezdxf.new(units=4)
             os.makedirs(os.path.dirname(library_path), exist_ok=True)
             lib_doc.saveas(library_path)
         else:

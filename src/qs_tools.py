@@ -30,6 +30,10 @@ DEFAULT_OVERHEAD_PERCENT = 6.5   # chi phí chung, % trên chi phí trực tiế
 DEFAULT_PROFIT_PERCENT = 5.5     # thu nhập chịu thuế tính trước, % trên (trực tiếp + chung)
 DEFAULT_VAT_PERCENT = 10.0       # thuế GTGT
 
+# Nhãn cho dòng khối lượng không tra được hệ MEPF nào. Không im lặng bỏ đi: layer đặt tên
+# tự do vẫn có thể là tuyến MEPF thật, nên đánh dấu để kỹ sư quyết định thay vì tự loại.
+UNKNOWN_SYSTEM_LABEL = "CHƯA XÁC ĐỊNH HỆ"
+
 
 def _strip_accents(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", str(text)) if unicodedata.category(c) != "Mn")
@@ -191,6 +195,9 @@ def calc_boq_cost(takeoff_excel_path: str, output_excel_path: str = "du_toan_chi
         name_col = next((c for c in cols if _norm(c) in ("hang muc", "ten cong tac", "noi dung")), None)
         qty_col = next((c for c in cols if _norm(c) in ("khoi luong", "so luong")), None)
         unit_col = next((c for c in cols if _norm(c) == "don vi"), None)
+        # Cột 'Hệ' phải đi tiếp sang bảng dự toán, nếu không `export_boq_vietnam` mất căn
+        # cứ phân chương và lại phải đoán theo tên hạng mục.
+        system_col = next((c for c in cols if _norm(c) == "he"), None)
         
         if not name_col or not qty_col:
             return (f"File '{takeoff_excel_path}' không có cột 'Hạng mục' và 'Khối lượng' cần thiết. "
@@ -212,6 +219,7 @@ def calc_boq_cost(takeoff_excel_path: str, output_excel_path: str = "du_toan_chi
                 missing.append(name)
                 rows.append({
                     "STT": len(rows) + 1, "Mã hiệu": "", "Hạng mục": name,
+                    "Hệ": str(item.get(system_col, "")) if system_col else "",
                     "Đơn vị": str(item.get(unit_col, "")) if unit_col else "", "Khối lượng": qty,
                     "Đơn giá VT": 0, "Đơn giá NC": 0, "Đơn giá M": 0,
                     "Thành tiền VT": 0, "Thành tiền NC": 0, "Thành tiền M": 0,
@@ -222,6 +230,7 @@ def calc_boq_cost(takeoff_excel_path: str, output_excel_path: str = "du_toan_chi
             vt, nc, m = match.get("don_gia_vat_tu", 0.0), match.get("don_gia_nhan_cong", 0.0), match.get("don_gia_may", 0.0)
             rows.append({
                 "STT": len(rows) + 1, "Mã hiệu": str(match.get("ma_hieu", "")), "Hạng mục": name,
+                "Hệ": str(item.get(system_col, "")) if system_col else "",
                 "Đơn vị": str(match.get("don_vi", "")), "Khối lượng": qty,
                 "Đơn giá VT": vt, "Đơn giá NC": nc, "Đơn giá M": m,
                 "Thành tiền VT": round(qty * vt), "Thành tiền NC": round(qty * nc),
@@ -304,12 +313,31 @@ SYSTEM_GROUPS = [
 OTHER_GROUP = ("E", "HẠNG MỤC KHÁC")
 
 
-def classify_boq_group(item_name: str):
-    """Xếp một hạng mục vào chương mục BOQ (A/B/C/D/E) theo từ khóa tên."""
+# Hệ kỹ thuật (theo cột 'Hệ' của bảng khối lượng) -> mã chương mục BOQ tương ứng.
+_SYSTEM_TO_GROUP_CODE = {
+    "HVAC": "A", "Điện": "B", "Cấp thoát nước": "C", "PCCC": "D",
+}
+
+
+def classify_boq_group(item_name: str, system: str = ""):
+    """Xếp một hạng mục vào chương mục BOQ (A/B/C/D/E).
+
+    Ưu tiên cột 'Hệ' do `auto_quantity_takeoff` xác định từ chính LAYER của bản vẽ — đó là
+    căn cứ chắc chắn hơn hẳn việc đoán qua từ khóa trong tên hạng mục. Đoán theo tên làm
+    ống gió trên layer chuẩn 'M-SAD' rơi vào chương "HẠNG MỤC KHÁC" chỉ vì cái tên không
+    chứa chữ "ong gio" — hạng mục HVAC bị xếp nhầm chương ngay trong hồ sơ nộp thầu.
+    Không có cột 'Hệ' (file cũ) thì vẫn đoán theo tên như trước.
+    """
+    code = _SYSTEM_TO_GROUP_CODE.get((system or "").strip())
+    if code:
+        for group_code, title, _ in SYSTEM_GROUPS:
+            if group_code == code:
+                return group_code, title
+
     name = _norm(item_name)
-    for code, title, keywords in SYSTEM_GROUPS:
+    for group_code, title, keywords in SYSTEM_GROUPS:
         if any(kw in name for kw in keywords):
-            return code, title
+            return group_code, title
     return OTHER_GROUP
 
 
@@ -345,10 +373,13 @@ def export_boq_vietnam(boq_excel_path: str, output_excel_path: str = "BOQ_mau_ch
             "nc": next((c for c in df.columns if _norm(c) == "don gia nc"), None),
         }
 
+        system_col = next((c for c in df.columns if _norm(c) == "he"), None)
+
         # Gom hạng mục theo chương mục.
         groups = {}
         for _, item in df.iterrows():
-            code, title = classify_boq_group(str(item[name_col]))
+            code, title = classify_boq_group(str(item[name_col]),
+                                             str(item.get(system_col, "")) if system_col else "")
             groups.setdefault((code, title), []).append(item)
 
         rows = []
@@ -422,47 +453,119 @@ import json  # noqa: E402
 import math  # noqa: E402
 import pandas as pd  # noqa: E402
 from ezdxf import audit  # noqa: E402
-from src import cad_loader, cad_geometry, cad_standards  # noqa: E402
+from src import cad_loader, cad_geometry, cad_standards, cad_units  # noqa: E402
 from src.tools import normalize_mepf_parameter_spec  # noqa: E402
-from src.bim_tools import classify_layer_system  # noqa: E402
+from src.bim_tools import classify_layer_system, classify_block_system  # noqa: E402
+
+def aggregate_block_attributes(block_counts: dict):
+    """Gộp các lần chèn cùng một loại thiết bị lại, bỏ qua thuộc tính ĐỊNH DANH.
+
+    Thiết bị trên hồ sơ thật gần như luôn được đánh mã riêng từng cái (`TAG=L-01`,
+    `L-02`...). Gộp theo nguyên văn chuỗi thuộc tính vì thế tách 500 bộ đèn cùng chủng
+    loại thành **500 dòng "1 Bộ"** — tổng thì vẫn đúng nhưng bảng dự toán không dùng được,
+    và `calc_boq_cost` sau đó tra đơn giá 500 lần cho cùng một thứ.
+
+    Phân biệt bằng chính dữ liệu, không cần danh sách tên thuộc tính cứng: thuộc tính mà
+    MỌI lần chèn đều mang giá trị khác nhau là mã định danh (bỏ khỏi khóa gộp, giữ lại
+    trong ghi chú); thuộc tính có giá trị lặp lại là thông số kỹ thuật và PHẢI giữ trong
+    khóa gộp — 36W và 18W là hai chủng loại khác nhau, gộp chung mới là sai.
+
+    Trả về `(block_counts đã gộp, {tên block: ghi chú mã định danh})`.
+    """
+    by_name = {}
+    for (name, attr_str), count in block_counts.items():
+        try:
+            attrs = json.loads(attr_str) if attr_str else {}
+        except (ValueError, TypeError):
+            attrs = {}
+        by_name.setdefault(name, []).append((attrs, count))
+
+    aggregated, identity_notes = {}, {}
+    for name, instances in by_name.items():
+        total = sum(count for _, count in instances)
+        all_keys = {key for attrs, _ in instances for key in attrs}
+        identity_keys = set()
+        for key in all_keys:
+            values = [attrs.get(key, "") for attrs, _ in instances]
+            # Chỉ coi là mã định danh khi TỪNG lần chèn một giá trị khác nhau.
+            if total > 1 and len(set(values)) == len(values) == total:
+                identity_keys.add(key)
+
+        for attrs, count in instances:
+            spec = {k: v for k, v in attrs.items() if k not in identity_keys}
+            key = (name, json.dumps(spec, ensure_ascii=False) if spec else "")
+            aggregated[key] = aggregated.get(key, 0) + count
+
+        if identity_keys:
+            samples = []
+            for key in sorted(identity_keys):
+                values = [str(attrs.get(key, "")) for attrs, _ in instances if attrs.get(key)]
+                shown = ", ".join(values[:3]) + (", ..." if len(values) > 3 else "")
+                samples.append(f"{key} ({shown})")
+            identity_notes[name] = (
+                f"Đã gộp {total} lần chèn cùng chủng loại; mã định danh riêng từng cái: "
+                + "; ".join(samples)
+            )
+
+    return aggregated, identity_notes
+
 
 @tool
 def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_toan.xlsx",
                           max_distance: float = 2000.0, wastage_percent: float = 5.0,
-                          pipe_stock_length_mm: float = 6000.0) -> str:
+                          pipe_stock_length_mm: float = 6000.0,
+                          drawing_unit: str = "", mep_only: bool = False) -> str:
     """Bóc tách khối lượng TỰ ĐỘNG & TOÀN DIỆN từ file CAD (.dxf/.dwg) và xuất thẳng ra
     Excel CHỈ BẰNG MỘT LẦN GỌI TOOL DUY NHẤT — không cần LLM tự đếm block, tự cộng chiều
     dài hay tự soạn JSON (những bước dễ sai với model AI yếu/model chạy offline qua Ollama).
     Quy trình bên trong (thuần toán học/hình học, KHÔNG dùng LLM):
     1. Nạp bản vẽ (tự chuyển .dwg sang .dxf nếu cần, tự gộp nội dung XREF nếu có) và audit
        làm sạch cấu trúc file.
-    2. KIỂM TRA ĐƠN VỊ BẢN VẼ (INSUNITS) — nếu khác Millimet, cảnh báo NGHIÊM TRỌNG ngay đầu
-       báo cáo vì mọi chiều dài tính ra sau đó có thể sai lệch hàng chục-hàng nghìn lần.
+    2. XÁC ĐỊNH VÀ QUY ĐỔI ĐƠN VỊ BẢN VẼ ($INSUNITS, hoặc tham số `drawing_unit` do người
+       dùng khai, hoặc suy đoán từ kích thước bao khi bản vẽ Unitless). Chiều dài được quy
+       đổi THẬT theo đơn vị đó — bản vẽ vẽ bằng mét/inch/feet ra đúng số mét, thay vì mặc
+       định coi mọi bản vẽ là mm rồi chia cứng 1000 (sai 1000 lần với bản vẽ mét). Chỉ khi
+       KHÔNG xác định được đơn vị mới cảnh báo để kỹ sư khai lại `drawing_unit`.
     3. PHÁT HIỆN HÌNH HỌC TRÙNG LẶP (overkill) trước khi cộng chiều dài — nếu bản vẽ chưa
        qua `optimize_cad_drawing`, các đoạn ống bị trace/copy chồng đè sẽ bị cộng dồn thừa;
        tool cảnh báo tổng chiều dài nghi trùng lặp theo layer thay vì âm thầm tính sai. Riêng
        hình học TRÙNG VỊ TRÍ giữa nội dung XREF và hình học vẽ trực tiếp trong bản vẽ chính
        (khác layer nên overkill theo layer không bắt được — thường do khách trace lại nội
        dung xref khi gộp thủ công nhiều nguồn) được kiểm tra và cảnh báo RIÊNG.
-    4. Đếm số lượng từng loại Block (thiết bị) theo tên + thuộc tính (attributes), cảnh báo
+    4. BUNG RUỘT BLOCK: đếm cả thiết bị lồng bên trong block khác và cộng tuyến ống/dây vẽ
+       BÊN TRONG block (cụm WC, module ống gió lặp lại) — phần này trước đây bị bỏ sót 100%;
+       một entity MINSERT (lưới hàng x cột, VD dàn đèn) được đếm đủ số bản sao thay vì đếm 1.
+    5. Đếm số lượng từng loại Block (thiết bị) theo tên + thuộc tính (attributes) — biến thể
+       Block ĐỘNG (AutoCAD lưu thành block ẩn danh `*U12`) được tra lại TÊN GỐC để không xé
+       một chủng loại thiết bị thành nhiều dòng tên vô nghĩa; cảnh báo
        riêng các Block bị insert lệch tỷ lệ (scale khác 1) vì kích thước thực tế sẽ khác chuẩn,
        và cảnh báo riêng các đối tượng thuộc Layer đang TẮT/ĐÓNG BĂNG (vẫn được tính vào khối
        lượng vì không tự đoán ý khách, nhưng nêu rõ để khách xác nhận có nên loại hay không).
-    5. Cộng dồn tổng chiều dài THẬT từng tuyến ống/dây theo Layer — tính đúng cung cong
-       (bulge trong LWPOLYLINE, entity ARC/CIRCLE) thay vì chỉ đo dây cung, và cộng cả
-       chênh lệch cao độ Z nếu tuyến đi xiên giữa các cao độ.
-    6. Suy ra số lượng phụ kiện co/tê/măng sông theo từng layer từ chính hình học tuyến —
+    6. Cộng dồn tổng chiều dài THẬT từng tuyến ống/dây theo Layer — tính đúng cung cong
+       (bulge trong LWPOLYLINE, entity ARC/CIRCLE, đường cong tự do SPLINE/ELLIPSE) thay vì
+       chỉ đo dây cung, cộng cả chênh lệch cao độ Z nếu tuyến đi xiên giữa các cao độ, quy
+       tọa độ OCS về WCS cho đối tượng vẽ trong UCS lật/xoay, và LOẠI lưới 3D (polyface/
+       polygon mesh) khỏi chiều dài ống vì đó là bề mặt mô hình chứ không phải tuyến.
+    7. Suy ra số lượng phụ kiện co/tê/măng sông theo từng layer từ chính hình học tuyến —
        cần thiết vì ống vẽ bằng LINE/POLYLINE thuần (không chèn Block phụ kiện) trước đây
        bị bỏ sót hoàn toàn phần phụ kiện.
-    7. Liên kết Ghi chú văn bản (TEXT/MTEXT, ví dụ 'Ống uPVC Ø110') với Layer ống gần nhất
+    8. Liên kết Ghi chú văn bản (TEXT/MTEXT, ví dụ 'Ống uPVC Ø110') với Layer ống gần nhất
        (Spatial Matching) để đặt tên hạng mục đúng theo bản vẽ thay vì chỉ ghi tên Layer thô —
        nếu tuyến gần nhất và tuyến gần nhì thuộc HAI HỆ KHÁC NHAU (VD ống gió HVAC và máng cáp
        Điện chạy song song sát nhau) với khoảng cách tương đương, ghi chú được coi là MƠ HỒ và
        KHÔNG gán vào tuyến nào (liệt kê riêng để kỹ sư tự đối chiếu) thay vì đoán bừa theo hệ
        gần nhất.
-    8. Cộng % hao hụt vật tư (`wastage_percent`, mặc định 5%) vào khối lượng ống/dây — số đo
+    9. Cộng % hao hụt vật tư (`wastage_percent`, mặc định 5%) vào khối lượng ống/dây — số đo
        hình học thuần luôn thấp hơn khối lượng cần mua thực tế do cắt nối, bù trừ khi thi công.
-    9. Ghi toàn bộ kết quả (STT, Hạng mục, Đơn vị, Khối lượng, Ghi chú) ra file Excel thật.
+    10. PHÂN LOẠI HỆ cho từng dòng (cột 'Hệ') và cảnh báo riêng phần KHÔNG tra được hệ MEPF —
+       bản vẽ thật luôn kèm nền kiến trúc (tường, trục, cửa) và lớp trình bày (đường kích
+       thước, ghi chú), tính chúng vào dự toán là sai hoàn toàn. Mặc định vẫn GIỮ các dòng
+       này (layer MEPF đặt tên tự do cũng rơi vào nhóm đó, tự loại sẽ thành bóc thiếu âm
+       thầm); đặt `mep_only=True` khi đã xác nhận đúng là nền kiến trúc để loại hẳn.
+    11. CẢNH BÁO tuyến vẽ bằng HAI NÉT SONG SONG (hai mép ống gió/ống nước cỡ lớn) — kiểu
+       thể hiện này làm chiều dài bị TÍNH ĐÔI. Chỉ cảnh báo, không tự trừ, vì hai tuyến
+       riêng biệt chạy song song sát nhau trông y hệt và trừ nhầm sẽ thành bóc thiếu một nửa.
+    12. Ghi toàn bộ kết quả (STT, Hạng mục, Hệ, Đơn vị, Khối lượng, Ghi chú) ra file Excel thật.
     Dùng tool này làm bước ĐẦU TIÊN VÀ DUY NHẤT khi cần bóc khối lượng/lập dự toán từ CAD;
     chỉ cần dùng `read_cad`/`analyze_cad_spatial_context` riêng lẻ khi cần phân tích sâu hơn.
     """
@@ -470,22 +573,18 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
     try:
         doc, load_notes = cad_loader.load_drawing(file_path)
 
-        # Kiểm tra đơn vị bản vẽ TRƯỚC KHI tính toán — sai đơn vị làm SAI LỆCH mọi chiều dài
-        # tính ra sau đó (hàng chục đến hàng nghìn lần) dù hình học và tổng dòng dự toán trông
-        # hoàn toàn bình thường, nên phải cảnh báo ngay tại đây thay vì chỉ ở tool audit riêng
-        # (`audit_cad_drawing_errors`) mà người dùng có thể quên gọi trước khi bóc khối lượng.
-        insunits = doc.header.get('$INSUNITS', 0)
-        insunits_warning = None
-        if insunits != 4:
-            unit_names = {0: "Không xác định (Unitless)", 1: "Inch", 2: "Feet", 5: "Centimet (cm)",
-                         6: "Met (m)", 8: "Microinch", 9: "Mil"}
-            unit_name = unit_names.get(insunits, f"Mã INSUNITS={insunits} (không xác định)")
-            insunits_warning = (
-                f"[CẢNH BÁO NGHIÊM TRỌNG] Đơn vị bản vẽ là '{unit_name}', KHÔNG PHẢI Millimet (mm) — "
-                f"TOÀN BỘ khối lượng ống/dây (đơn vị 'm') dưới đây có thể SAI LỆCH so với thực tế nếu "
-                f"khách thực sự vẽ bằng đơn vị khác mm. PHẢI xác nhận lại đơn vị vẽ thực tế với khách "
-                f"trước khi dùng bảng dự toán này để lập hồ sơ thầu."
-            )
+        # Xác định đơn vị bản vẽ TRƯỚC KHI tính toán và QUY ĐỔI THẬT theo đơn vị đó. Bản
+        # cũ chia cứng cho 1000 (mặc định mm) và chỉ *cảnh báo* khi đơn vị khác — bản vẽ vẽ
+        # bằng mét vẫn xuất ra Excel với con số nhỏ hơn thực tế 1000 lần. Cảnh báo không sửa
+        # được số; quy đổi thì có.
+        dwg_unit = cad_units.detect_drawing_unit(doc, drawing_unit)
+        insunits_warning = cad_units.unit_warning(dwg_unit) or None
+
+        # Mọi ngưỡng dưới đây vốn khai theo MILIMET nên phải đổi sang đơn vị bản vẽ, nếu
+        # không thì đổi đúng chiều dài mà vẫn suy sai số phụ kiện và bán kính gán ghi chú.
+        stock_length_du = dwg_unit.mm(pipe_stock_length_mm)
+        joint_tolerance_du = dwg_unit.mm(cad_geometry.JOINT_TOLERANCE)
+        max_distance_du = dwg_unit.mm(max_distance)
 
         auditor = audit.Auditor(doc)
         auditor.run()
@@ -495,6 +594,11 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
 
         block_counts = {}  # (name, attrib_str) -> count
         scaled_blocks = {}  # (name, xscale, yscale) -> count
+        exploded_blocks = {}  # tên block -> chiều dài tuyến lấy được từ ruột block
+        anonymous_blocks = {}  # block ẩn danh (*U…) không tra được tên gốc -> số lần chèn
+        nested_block_hits = {}  # tên block lồng bên trong block khác -> số lượng
+        # Ngưỡng coi hình học trong block là TUYẾN THẬT chứ không phải nét vẽ ký hiệu.
+        significant_block_length_du = dwg_unit.mm(1000.0)
         texts = []
         all_segments = []  # dùng cho cả tổng chiều dài, spatial-match và suy phụ kiện
 
@@ -520,7 +624,11 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 off_frozen_layer_hits[entity_layer] = off_frozen_layer_hits.get(entity_layer, 0) + 1
 
             if dxftype == 'INSERT':
-                b_name = entity.dxf.name
+                # Block động được AutoCAD lưu thành block ẩn danh (*U12); lấy lại tên gốc
+                # để không xé một chủng loại thiết bị thành nhiều dòng tên vô nghĩa.
+                b_name, is_anonymous = cad_geometry.effective_block_name(entity, doc)
+                if is_anonymous:
+                    anonymous_blocks[b_name] = anonymous_blocks.get(b_name, 0) + 1
                 attribs = {}
                 if hasattr(entity, 'attribs') and entity.attribs:
                     for attrib in entity.attribs:
@@ -528,16 +636,45 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                             attribs[attrib.dxf.tag] = getattr(attrib.dxf, 'text', '')
                 attr_str = json.dumps(attribs, ensure_ascii=False) if attribs else ""
                 key = (b_name, attr_str)
-                block_counts[key] = block_counts.get(key, 0) + 1
+                # MINSERT: một entity INSERT có thể là cả một LƯỚI hàng x cột (dàn đèn,
+                # dàn đầu phun). Đếm 1 là bóc thiếu cả dàn.
+                repeat = cad_geometry.insert_repeat_count(entity)
+                block_counts[key] = block_counts.get(key, 0) + repeat
                 if cad_geometry.is_scaled(entity):
                     xs, ys, _ = cad_geometry.block_scale(entity)
                     skey = (b_name, round(xs, 3), round(ys, 3))
-                    scaled_blocks[skey] = scaled_blocks.get(skey, 0) + 1
+                    scaled_blocks[skey] = scaled_blocks.get(skey, 0) + repeat
+
+                # Bung ruột Block để lấy tuyến ống/dây và thiết bị vẽ BÊN TRONG block —
+                # phần này trước đây bị bỏ sót hoàn toàn (xem `cad_geometry.explode_insert`).
+                # Ghi chú kích thước rất hay được đặt bằng BLOCK có thuộc tính (block nhãn
+                # tuyến) chứ không phải TEXT rời. Bỏ qua chúng thì hạng mục giữ nguyên tên
+                # layer thô dù bản vẽ đã ghi rõ 'Ống uPVC Ø110' ngay cạnh tuyến.
+                # Chỉ nhận giá trị CÓ DẠNG KÍCH THƯỚC (Ø110, DN100, 600x400) để mã hiệu
+                # thiết bị (TAG=L-01) không bị dùng nhầm làm tên hạng mục.
+                for attr_value in attribs.values():
+                    if cad_geometry.parse_nominal_half_width(attr_value or ""):
+                        spec = normalize_mepf_parameter_spec((attr_value or "").strip())
+                        if spec:
+                            texts.append({"text": spec,
+                                          "pos": (entity.dxf.insert.x, entity.dxf.insert.y)})
+
+                inner_segments, inner_inserts = cad_geometry.explode_insert(entity, doc)
+                inner_length = sum(s["length"] for s in inner_segments)
+                if inner_length >= significant_block_length_du:
+                    # Ngưỡng độ dài: nét vẽ của một KÝ HIỆU (van, đèn, ổ cắm) chỉ dài vài
+                    # chục mm và không phải tuyến — cộng chúng vào sẽ thổi phồng chiều dài
+                    # ống. Chỉ block chứa tuyến thật (dài hơn ngưỡng) mới được gộp.
+                    all_segments.extend(inner_segments)
+                    exploded_blocks[b_name] = exploded_blocks.get(b_name, 0.0) + inner_length
+                for inner_name, inner_qty in inner_inserts:
+                    inner_key = (inner_name, "")
+                    block_counts[inner_key] = block_counts.get(inner_key, 0) + inner_qty
+                    nested_block_hits[inner_name] = nested_block_hits.get(inner_name, 0) + inner_qty
                 continue
 
             if dxftype in ('TEXT', 'MTEXT'):
-                raw = entity.dxf.text if dxftype == 'TEXT' else entity.text
-                t_str = normalize_mepf_parameter_spec((raw or '').strip())
+                t_str = normalize_mepf_parameter_spec(cad_geometry.plain_entity_text(entity))
                 pos = entity.dxf.insert
                 if t_str:
                     texts.append({"text": t_str, "pos": (pos.x, pos.y)})
@@ -570,7 +707,7 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
         # gửi file chưa qua `optimize_cad_drawing`, các đoạn ống bị trace/copy chồng đè sẽ
         # bị CỘNG DỒN LÀM ĐÔI chiều dài mà không có dấu hiệu bất thường nào trong kết quả.
         # Chỉ cảnh báo (không tự xóa) vì tool này không được phép âm thầm sửa hình học.
-        _OVERKILL_TOLERANCE = 1.0
+        _OVERKILL_TOLERANCE = joint_tolerance_du
 
         def _rounded_endpoints(seg):
             (sax, say, _), (sbx, sby, _) = seg["start"], seg["end"]
@@ -655,7 +792,7 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                     min_idx = np.argmin(dist_sq)
                     min_dist = np.sqrt(dist_sq[min_idx])
 
-                    if min_dist > max_distance:
+                    if min_dist > max_distance_du:
                         continue
 
                     nearest_system = seg_systems[min_idx]
@@ -688,7 +825,7 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                         d = _seg_dist(tx, ty, seg)
                         if d < min_dist:
                             min_dist, best_layer, best_system = d, seg["layer"], layer_systems[seg["layer"]]
-                    if best_layer is None or min_dist > max_distance:
+                    if best_layer is None or min_dist > max_distance_du:
                         continue
                     if best_system:
                         for seg in all_segments:
@@ -702,24 +839,52 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                     bucket = layer_labels.setdefault(best_layer, {})
                     bucket[t["text"]] = bucket.get(t["text"], 0) + 1
 
-        fittings_by_layer = cad_geometry.detect_fittings(all_segments, stock_length=pipe_stock_length_mm)
+        # Tuyến vẽ bằng 2 nét song song (hai mép ống gió/ống nước cỡ lớn) bị cộng dồn thành
+        # gấp đôi chiều dài thật. Chỉ cảnh báo, không tự trừ — xem `detect_double_line_runs`.
+        double_line_by_layer = cad_geometry.detect_double_line_runs(
+            all_segments, max_width=dwg_unit.mm(cad_geometry.DEFAULT_DOUBLE_LINE_MAX_WIDTH),
+            min_separation=joint_tolerance_du)
+
+        fittings_by_layer = cad_geometry.detect_fittings(
+            all_segments, stock_length=stock_length_du, tolerance=joint_tolerance_du)
 
         rows = []
         stt = 1
+        # Dòng KHÔNG nhận diện được hệ MEPF thường là nền kiến trúc (tường, trục, cửa) hoặc
+        # lớp trình bày (dim, ghi chú) lẫn trong file — xem `UNKNOWN_SYSTEM_LABEL`.
+        unknown_layers = {}   # layer -> chiều dài (đơn vị bản vẽ)
+        unknown_blocks = {}   # tên block -> số lượng
+
+        # Gộp các lần chèn cùng chủng loại, bỏ qua mã định danh riêng từng cái.
+        block_counts, identity_notes = aggregate_block_attributes(block_counts)
+
         for (b_name, attr_str), count in sorted(block_counts.items(), key=lambda x: -x[1]):
             ghi_chu = attr_str if attr_str else ""
+            if b_name in identity_notes:
+                ghi_chu = (ghi_chu + " | " if ghi_chu else "") + identity_notes[b_name]
+            block_system = classify_block_system(b_name)
+            if not block_system:
+                unknown_blocks[b_name] = unknown_blocks.get(b_name, 0) + count
             # Đơn vị tra theo loại Block (đèn/ổ cắm/đầu phun... = "Cái", cụm thiết bị
             # trọn bộ như FCU/bơm = "Bộ") qua cad_standards.BLOCK_STANDARD, khớp thói
             # quen hồ sơ thầu VN — "Bộ" chỉ còn là dự phòng khi không nhận diện được
             # Block (trước đây gán cứng "Bộ" cho mọi Block bất kể loại).
             block_key = cad_standards.match_block(b_name)
             unit = cad_standards.BLOCK_STANDARD[block_key]["unit"] if block_key else "Bộ"
-            rows.append({"STT": stt, "Hạng mục": b_name, "Đơn vị": unit, "Khối lượng": count, "Ghi chú": ghi_chu})
+            if mep_only and not block_system:
+                continue
+            rows.append({"STT": stt, "Hạng mục": b_name, "Hệ": block_system or UNKNOWN_SYSTEM_LABEL,
+                         "Đơn vị": unit, "Khối lượng": count, "Ghi chú": ghi_chu})
             stt += 1
 
         for layer, length in sorted(layer_lengths.items(), key=lambda x: -x[1]):
             if length <= 0:
                 continue
+            layer_system = layer_systems.get(layer) or classify_layer_system(layer)
+            if not layer_system:
+                unknown_layers[layer] = length
+                if mep_only:
+                    continue
             label = layer
             note = f"Layer: {layer}"
             if layer in layer_labels:
@@ -730,12 +895,12 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
             # cad_geometry.py). Cột "Khối lượng" ở đây khai đơn vị "m" nên PHẢI đổi
             # mm -> m trước khi ghi ra — thiếu bước này từng khiến khối lượng xuất ra
             # sai lệch gấp 1000 lần (bug đã sửa, xem test_qs_tools_units.py).
-            length_m = length / 1000.0
+            length_m = dwg_unit.length_m(length)
             length_with_wastage_m = length_m * (1 + wastage_percent / 100.0)
             if wastage_percent > 0:
                 note += f" (đã cộng {wastage_percent:.0f}% hao hụt vật tư)"
-            rows.append({"STT": stt, "Hạng mục": label, "Đơn vị": "m",
-                        "Khối lượng": round(length_with_wastage_m, 2), "Ghi chú": note})
+            rows.append({"STT": stt, "Hạng mục": label, "Hệ": layer_system or UNKNOWN_SYSTEM_LABEL,
+                        "Đơn vị": "m", "Khối lượng": round(length_with_wastage_m, 2), "Ghi chú": note})
             stt += 1
 
             fittings = fittings_by_layer.get(layer, {})
@@ -744,13 +909,21 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 if qty <= 0:
                     continue
                 rows.append({
-                    "STT": stt, "Hạng mục": f"{fitting_labels[key]} - {label}", "Đơn vị": "Cái",
+                    "STT": stt, "Hạng mục": f"{fitting_labels[key]} - {label}",
+                    "Hệ": layer_system or UNKNOWN_SYSTEM_LABEL, "Đơn vị": "Cái",
                     "Khối lượng": qty,
                     "Ghi chú": f"Suy từ hình học tuyến (Layer: {layer}) — cần đối chiếu bản vẽ chi tiết",
                 })
                 stt += 1
 
         if not rows:
+            if mep_only and (unknown_layers or unknown_blocks):
+                return (
+                    "Đang bật `mep_only=True` nên mọi hạng mục đều bị loại: không tra được hệ "
+                    "MEPF cho bất kỳ Layer/Block nào trong bản vẽ. Nhiều khả năng bản vẽ đặt tên "
+                    "layer tự do — chạy `standardize_cad_drawing` để chuẩn hóa tên layer, hoặc "
+                    "bóc lại với `mep_only=False` rồi tự lọc theo cột 'Hệ'."
+                )
             return "Không tìm thấy Block hoặc tuyến ống/dây nào trong bản vẽ để bóc khối lượng."
 
         out_path = output_excel_path if output_excel_path.endswith('.xlsx') else output_excel_path + '.xlsx'
@@ -784,7 +957,7 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 "theo layer gần nhất.\n\n"
             )
         if duplicate_length_by_layer:
-            total_dup_m = sum(duplicate_length_by_layer.values()) / 1000.0
+            total_dup_m = dwg_unit.length_m(sum(duplicate_length_by_layer.values()))
             summary += (
                 f"[CẢNH BÁO NGHIÊM TRỌNG] Phát hiện hình học TRÙNG LẶP (overkill) ước tính "
                 f"~{total_dup_m:.1f} m bị cộng dồn thừa vào khối lượng, tại các Layer: "
@@ -793,7 +966,7 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 "khi dùng bảng dự toán này.\n\n"
             )
         if xref_overlap_length > 0:
-            total_xref_dup_m = xref_overlap_length / 1000.0
+            total_xref_dup_m = dwg_unit.length_m(xref_overlap_length)
             summary += (
                 f"[CẢNH BÁO NGHIÊM TRỌNG] Phát hiện ~{total_xref_dup_m:.1f} m hình học TRÙNG VỊ TRÍ "
                 f"giữa nội dung XREF và hình học VẼ TRỰC TIẾP trong bản vẽ chính (khác layer nên "
@@ -803,13 +976,87 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 "nhiều nguồn — kiểm tra kỹ trước khi dùng khối lượng này, có thể đang bị TÍNH ĐÔI.\n\n"
             )
 
+        if unknown_layers or unknown_blocks:
+            parts = []
+            if unknown_layers:
+                total_unknown_m = dwg_unit.length_m(sum(unknown_layers.values()))
+                parts.append(f"{len(unknown_layers)} Layer với ~{total_unknown_m:.1f} m "
+                             f"({', '.join(sorted(unknown_layers))})")
+            if unknown_blocks:
+                parts.append(f"{sum(unknown_blocks.values())} Block "
+                             f"({', '.join(sorted(unknown_blocks))})")
+            summary += (
+                "[CẢNH BÁO NGHIÊM TRỌNG] Không tra được hệ MEPF cho: " + "; ".join(parts) + ". "
+                "Đây thường là NỀN KIẾN TRÚC (tường, trục định vị, cửa) hoặc lớp trình bày "
+                "(đường kích thước, ghi chú, khung tên) lẫn trong file — tính vào dự toán là "
+                "SAI HOÀN TOÀN, và các dòng phụ kiện co/tê/măng sông suy ra từ chúng cũng vô "
+                "nghĩa theo. Các dòng này được đánh dấu '" + UNKNOWN_SYSTEM_LABEL + "' ở cột "
+                "'Hệ' để rà nhanh; loại bỏ chúng rồi bóc lại bằng `mep_only=True` nếu đúng là "
+                "nền kiến trúc (mặc định đang GIỮ chúng lại). Layer MEPF thật nhưng đặt tên tự do cũng rơi vào nhóm này — "
+                "hãy chạy `standardize_cad_drawing` để chuẩn hóa tên layer trước khi bóc.\n\n"
+            )
+        # Nhiều layer khác tên nhưng cùng quy về MỘT tên chuẩn (VD 'ONG_CAP_NUOC',
+        # 'ONG-CAP-NUOC', 'ong cap nuoc') làm khối lượng của cùng một loại ống bị xé ra
+        # nhiều dòng. KHÔNG tự gộp: `match_layer` quy cả 'ONG_CAP_NUOC_NONG' (nước nóng)
+        # về cùng khóa với nước lạnh, gộp máy móc sẽ trộn hai loại ống khác hẳn nhau.
+        standard_groups = {}
+        for layer in layer_lengths:
+            key = cad_standards.match_layer(layer)
+            if key:
+                standard_groups.setdefault(key, []).append(layer)
+        split_groups = {k: v for k, v in standard_groups.items() if len(v) > 1}
+        if split_groups:
+            detail = "; ".join(f"{k}: {', '.join(sorted(v))}" for k, v in sorted(split_groups.items()))
+            summary += (
+                f"[CẢNH BÁO] {len(split_groups)} nhóm layer khác tên nhưng cùng mô tả một loại "
+                f"tuyến nên khối lượng bị TÁCH thành nhiều dòng rời: {detail}. Thường do file "
+                f"ghép từ nhiều nguồn đặt tên layer không thống nhất. Tool KHÔNG tự gộp vì tên "
+                f"chuẩn không phân biệt được hết (VD ống nước nóng và nước lạnh cùng quy về một "
+                f"khóa) — chạy `standardize_cad_drawing` hoặc tự cộng các dòng này khi lập dự toán.\n\n"
+            )
+
+        if double_line_by_layer:
+            total_double_m = dwg_unit.length_m(sum(double_line_by_layer.values()))
+            summary += (
+                f"[CẢNH BÁO NGHIÊM TRỌNG] Phát hiện ~{total_double_m:.1f} m tuyến có thể đang được "
+                f"vẽ bằng HAI NÉT SONG SONG (hai mép ống, kiểu thể hiện quen thuộc của ống gió và "
+                f"ống nước cỡ lớn), tại các Layer: " + ", ".join(sorted(double_line_by_layer)) + ". "
+                "Nếu đúng vậy thì chiều dài các tuyến này đang bị TÍNH ĐÔI và phải lấy một nửa. "
+                "Tool KHÔNG tự trừ vì hai tuyến riêng biệt chạy song song sát nhau (VD ống cấp và "
+                "ống hồi đi cùng trục) trông y hệt — trừ nhầm sẽ thành bóc thiếu đúng một nửa. "
+                "Hãy mở bản vẽ đối chiếu cách thể hiện rồi tự quyết định.\n\n"
+            )
+
         summary += (
             f"BÓC TÁCH KHỐI LƯỢNG TỰ ĐỘNG THÀNH CÔNG (offline, không cần LLM tính toán).\n"
+            f"- Đơn vị bản vẽ: {dwg_unit.name} ({dwg_unit.source}); mọi chiều dài đã quy đổi ra mét "
+            f"theo hệ số 1 đơn vị = {dwg_unit.mm_per_unit:g} mm.\n"
             f"- Đã làm sạch bản vẽ (Audit sửa {audit_fixes} lỗi).\n"
             f"- Tổng {len(block_counts)} loại Block (thiết bị) và {len([lyr for lyr, v in layer_lengths.items() if v > 0])} tuyến ống/dây có khối lượng.\n"
             f"- Khối lượng ống/dây đã cộng {wastage_percent:.0f}% hao hụt vật tư theo định mức.\n"
             f"- Đã ghi {len(rows)} dòng dự toán ra file Excel tại: {out_path}\n"
         )
+        if exploded_blocks:
+            total_inner_m = dwg_unit.length_m(sum(exploded_blocks.values()))
+            summary += (
+                f"- Đã cộng thêm ~{total_inner_m:.1f} m tuyến ống/dây vẽ BÊN TRONG Block "
+                f"({', '.join(sorted(exploded_blocks))}) — phần này nằm trong ruột block nên "
+                f"trước đây bị bóc thiếu hoàn toàn.\n"
+            )
+        if anonymous_blocks:
+            summary += (
+                f"[CẢNH BÁO] {sum(anonymous_blocks.values())} lần chèn thuộc "
+                f"{len(anonymous_blocks)} Block ẨN DANH ({', '.join(sorted(anonymous_blocks))}) — "
+                f"đây là biến thể của Block động (dynamic block) mà bản vẽ không lưu kèm tên gốc. "
+                f"Các dòng này đang mang tên kỹ thuật vô nghĩa và có thể là cùng MỘT chủng loại "
+                f"thiết bị bị tách thành nhiều dòng; cần mở bản vẽ đối chiếu và đặt lại tên hạng "
+                f"mục trước khi gửi dự toán.\n"
+            )
+        if nested_block_hits:
+            summary += (
+                f"- Đã đếm thêm {sum(nested_block_hits.values())} thiết bị LỒNG bên trong Block "
+                f"khác ({', '.join(sorted(nested_block_hits))}).\n"
+            )
         for note in load_notes:
             summary += f"- {note}\n"
         if scaled_blocks:
@@ -877,6 +1124,19 @@ def calc_support_hangers(pipe_or_duct_length_m: float, spacing_m: float = 2.0,
         return f"Lỗi tính giá đỡ/ty treo: {e}"
 
 
+def _revit_system(category: str, name: str) -> str:
+    """Hệ kỹ thuật của một cấu kiện Revit, suy từ Category rồi tới tên cấu kiện.
+
+    Luồng AutoCAD gắn cột 'Hệ' cho từng dòng (dùng để phân chương BOQ nộp thầu và để lọc
+    nội dung không phải MEPF). Thiếu cột này thì bảng khối lượng từ Revit KHÔNG còn đối
+    chiếu trực tiếp được với bảng từ AutoCAD nữa, đúng thứ hàm dưới đây cam kết.
+    Category của Revit ('Ducts', 'Pipes', 'Cable Trays') đã đủ để `classify_layer_system`
+    nhận diện qua bảng từ khóa.
+    """
+    return (classify_layer_system(category) or classify_layer_system(name)
+            or UNKNOWN_SYSTEM_LABEL)
+
+
 def build_revit_boq_excel(elements: list[dict], output_excel_path: str,
                            wastage_percent: float = 5.0) -> str | None:
     """Lập bảng khối lượng (BOQ) thật từ payload cấu kiện Revit (xem
@@ -912,12 +1172,14 @@ def build_revit_boq_excel(elements: list[dict], output_excel_path: str,
         note = f"Category: {category}"
         if wastage_percent > 0:
             note += f" (đã cộng {wastage_percent:.0f}% hao hụt vật tư)"
-        rows.append({"STT": stt, "Hạng mục": name, "Đơn vị": "m",
+        rows.append({"STT": stt, "Hạng mục": name,
+                     "Hệ": _revit_system(category, name), "Đơn vị": "m",
                      "Khối lượng": round(length_with_wastage_m, 2), "Ghi chú": note})
         stt += 1
 
     for (category, name), qty in sorted(count_by_key.items(), key=lambda x: -x[1]):
-        rows.append({"STT": stt, "Hạng mục": name, "Đơn vị": "Cái", "Khối lượng": qty,
+        rows.append({"STT": stt, "Hạng mục": name, "Hệ": _revit_system(category, name),
+                     "Đơn vị": "Cái", "Khối lượng": qty,
                      "Ghi chú": f"Category: {category}"})
         stt += 1
 

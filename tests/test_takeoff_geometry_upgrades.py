@@ -18,7 +18,7 @@ def workspace(tmp_path):
 
 
 def test_takeoff_counts_arc_length_correctly(workspace):
-    doc = ezdxf.new()
+    doc = ezdxf.new(units=4)
     msp = doc.modelspace()
     doc.layers.add("PIPE_ARC")
     msp.add_arc(center=(0, 0), radius=1000, start_angle=0, end_angle=90,
@@ -36,7 +36,7 @@ def test_takeoff_counts_arc_length_correctly(workspace):
 
 def test_takeoff_reports_fittings_as_separate_rows(workspace):
     """Ống vẽ bằng LINE thuần (không có Block phụ kiện) vẫn phải ra được số phụ kiện."""
-    doc = ezdxf.new()
+    doc = ezdxf.new(units=4)
     msp = doc.modelspace()
     doc.layers.add("PIPE_L")
     msp.add_line((0, 0), (5000, 0), dxfattribs={"layer": "PIPE_L"})
@@ -52,7 +52,7 @@ def test_takeoff_reports_fittings_as_separate_rows(workspace):
 def test_takeoff_applies_wastage_to_pipe_length_but_not_block_count(workspace):
     """Hao hụt vật tư áp cho khối lượng ống/dây; số lượng thiết bị (Block) không bị nhân
     hao hụt vì thiết bị đếm theo cái, không hao hụt như vật liệu cắt nối."""
-    doc = ezdxf.new()
+    doc = ezdxf.new(units=4)
     msp = doc.modelspace()
     doc.layers.add("PIPE_W")
     msp.add_line((0, 0), (1000, 0), dxfattribs={"layer": "PIPE_W"})
@@ -75,7 +75,7 @@ def test_takeoff_applies_wastage_to_pipe_length_but_not_block_count(workspace):
 def test_takeoff_warns_about_scaled_blocks(workspace):
     """Đèn 600x600 chèn ở scale 1.5 vẫn đếm đúng số lượng nhưng phải cảnh báo kích thước
     thực tế khác chuẩn, thay vì âm thầm coi là đúng chuẩn."""
-    doc = ezdxf.new()
+    doc = ezdxf.new(units=4)
     msp = doc.modelspace()
     blk = doc.blocks.new("LIGHT_PANEL")
     blk.add_circle((0, 0), radius=10)
@@ -92,7 +92,7 @@ def test_takeoff_warns_about_scaled_blocks(workspace):
 
 
 def test_takeoff_does_not_warn_when_no_block_is_scaled(workspace):
-    doc = ezdxf.new()
+    doc = ezdxf.new(units=4)
     msp = doc.modelspace()
     blk = doc.blocks.new("LIGHT_PANEL")
     blk.add_circle((0, 0), radius=10)
@@ -109,7 +109,7 @@ def test_takeoff_reads_dwg_and_notes_conversion(monkeypatch, workspace):
 
     def fake_convert(path, output_dir=None, timeout=180):
         out = os.path.join(output_dir, "bv.dxf")
-        doc = ezdxf.new()
+        doc = ezdxf.new(units=4)
         msp = doc.modelspace()
         doc.layers.add("PIPE_DWG")
         msp.add_line((0, 0), (500, 0), dxfattribs={"layer": "PIPE_DWG"})
@@ -128,7 +128,7 @@ def test_takeoff_reads_dwg_and_notes_conversion(monkeypatch, workspace):
 
 
 def test_takeoff_reports_missing_xref_file(workspace):
-    doc = ezdxf.new()
+    doc = ezdxf.new(units=4)
     msp = doc.modelspace()
     doc.layers.add("PIPE_MAIN")
     msp.add_line((0, 0), (100, 0), dxfattribs={"layer": "PIPE_MAIN"})
@@ -142,13 +142,13 @@ def test_takeoff_reports_missing_xref_file(workspace):
 
 
 def test_takeoff_merges_xref_content_into_totals(workspace):
-    xref_doc = ezdxf.new()
+    xref_doc = ezdxf.new(units=4)
     xref_msp = xref_doc.modelspace()
     xref_doc.layers.add("PIPE_XREF")
     xref_msp.add_line((0, 0), (300, 0), dxfattribs={"layer": "PIPE_XREF"})
     xref_doc.saveas(resolve_safe_path("phu.dxf"))
 
-    doc = ezdxf.new()
+    doc = ezdxf.new(units=4)
     msp = doc.modelspace()
     doc.blocks.new("XREF1", dxfattribs={"flags": 4, "xref_path": "phu.dxf"})
     msp.add_blockref("XREF1", (0, 0))

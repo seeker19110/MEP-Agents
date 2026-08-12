@@ -15,7 +15,10 @@ def workspace(tmp_path):
 
 
 def _make_sample_dxf(path: str):
-    doc = ezdxf.new('R2010')
+    # units=4: khai rõ bản vẽ vẽ bằng mm. `ezdxf.new()` mặc định khai MÉT ($INSUNITS=6)
+    # nên fixture không khai đơn vị sẽ mô tả một bản vẽ mét, trong khi mọi tọa độ ở đây
+    # (và kỳ vọng khối lượng bên dưới) đều theo mm.
+    doc = ezdxf.new('R2010', units=4)
     doc.layers.add(name="ONG_CAP_NUOC")
     doc.layers.add(name="THIET_BI")
     msp = doc.modelspace()
