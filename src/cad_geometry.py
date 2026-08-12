@@ -10,6 +10,12 @@ hệ quả sai số trong hồ sơ thật:
    tính một mét nào.
 3. **Cao độ bị bỏ qua.** Tuyến đi xiên giữa hai cao độ (ống lên/xuống trục kỹ thuật) bị
    đo bằng hình chiếu bằng, luôn ngắn hơn chiều dài thật.
+4. **SPLINE/ELLIPSE bị bỏ hẳn.** Tuyến uốn cong tự do vẽ bằng SPLINE đo ra đúng 0 m.
+5. **Lưới 3D bị đếm nhầm thành ống.** POLYLINE dạng polyface/polygon mesh là bề mặt 3D,
+   cộng cạnh lưới vào chiều dài ống cho ra một con số vô nghĩa.
+6. **Tọa độ OCS bị đọc như WCS.** Đối tượng vẽ trong UCS lật/xoay lưu tọa độ theo hệ
+   riêng; đọc thẳng là đặt tuyến sai chỗ trên mặt bằng (chiều dài vẫn đúng, nhưng ghi chú
+   bị gán nhầm tuyến và hình học trùng lặp không bị bắt).
 
 Toàn bộ hàm ở đây là hình học thuần, không phụ thuộc LLM.
 """
@@ -109,14 +115,84 @@ def arc_entity_length(entity) -> float:
     return radius * math.radians(sweep)
 
 
+# Độ mịn khi bẻ SPLINE/ELLIPSE thành đường gấp khúc: sai số phình (sagitta) tối đa bằng
+# 1/1000 kích thước bao của chính đường cong. Dùng tỷ lệ thay vì một con số mm cố định để
+# không phụ thuộc đơn vị bản vẽ; 0.1% là mịn hơn nhiều so với sai số thi công thực tế.
+_CURVE_FLATTENING_RATIO = 0.001
+
+
+def _flattened_points(entity):
+    """Điểm xấp xỉ của một đường cong tự do (SPLINE/ELLIPSE) theo độ mịn tương đối."""
+    try:
+        points = [(p[0], p[1], p[2] if len(p) > 2 else 0.0)
+                  for p in entity.control_points] if entity.dxftype() == "SPLINE" else []
+    except Exception:
+        points = []
+    if points:
+        span = max(max(p[i] for p in points) - min(p[i] for p in points) for i in (0, 1))
+    else:
+        span = float(getattr(entity.dxf, "major_axis", (1.0, 0.0, 0.0))[0] or 1.0) * 2
+    distance = abs(span) * _CURVE_FLATTENING_RATIO
+    if distance <= 0:
+        distance = 1e-6
+    return [(p[0], p[1], p[2] if len(p) > 2 else 0.0) for p in entity.flattening(distance)]
+
+
+def _curve_segments(entity):
+    """Các đoạn xấp xỉ của SPLINE/ELLIPSE.
+
+    Ống/ống gió vẽ bằng SPLINE (tuyến uốn cong tự do) hoặc ELLIPSE trước đây được đo là
+    **0 m** — bỏ sót trọn vẹn, không một dòng cảnh báo. Đánh dấu `is_arc=True` để phần suy
+    phụ kiện coi cả tuyến cong là một chỗ đổi hướng, không đếm mỗi mắt xấp xỉ là một co.
+    """
+    points = _flattened_points(entity)
+    if len(points) < 2:
+        return []
+    segments = []
+    for p1, p2 in zip(points[:-1], points[1:]):
+        length = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2 + (p2[2] - p1[2]) ** 2)
+        segments.append({"start": p1, "end": p2, "bulge": None, "length": length, "is_arc": True})
+    return segments
+
+
+def _to_wcs(entity, segments):
+    """Đưa tọa độ đoạn từ OCS về WCS khi entity có vector đùn (extrusion) khác mặc định.
+
+    Đối tượng vẽ trong UCS lật hoặc xoay được lưu với `extrusion` khác (0,0,1) và tọa độ
+    tính trong hệ riêng của nó. Đọc thẳng tọa độ đó là **đặt tuyến sai chỗ trên mặt bằng**
+    (VD extrusion (0,0,-1) lật dấu trục X): chiều dài vẫn đúng vì phép biến đổi là trực
+    giao, nhưng ghi chú kích thước bị gán nhầm tuyến, hình học trùng lặp không bị bắt, và
+    kiểm tra va chạm so sai vị trí.
+    """
+    try:
+        extrusion = tuple(getattr(entity.dxf, "extrusion", (0.0, 0.0, 1.0)) or (0.0, 0.0, 1.0))
+    except Exception:
+        return segments
+    if not segments or all(abs(a - b) < 1e-9 for a, b in zip(extrusion, (0.0, 0.0, 1.0))):
+        return segments
+
+    ocs = entity.ocs()
+    for seg in segments:
+        for key in ("start", "end"):
+            point = ocs.to_wcs(seg[key])
+            seg[key] = (point[0], point[1], point[2])
+    return segments
+
+
 def entity_segments(entity):
-    """Chuẩn hóa mọi entity đo được về cùng một danh sách đoạn.
+    """Chuẩn hóa mọi entity đo được về cùng một danh sách đoạn, tọa độ theo WCS.
 
     Hỗ trợ LINE (kể cả xiên theo Z), LWPOLYLINE/POLYLINE (kể cả cung bulge và polyline
-    đóng), ARC và CIRCLE. Entity không đo được trả về danh sách rỗng.
+    đóng), ARC, CIRCLE, SPLINE và ELLIPSE. Entity không đo được trả về danh sách rỗng.
+
+    POLYLINE dạng LƯỚI (polyface mesh / polygon mesh) bị loại: đó là bề mặt 3D, không phải
+    tuyến ống — cộng cạnh lưới vào sẽ thổi phồng chiều dài ống bằng một con số vô nghĩa.
     """
     dxftype = entity.dxftype()
     try:
+        if dxftype in ("SPLINE", "ELLIPSE"):
+            return _curve_segments(entity)
+
         if dxftype == "LINE":
             s, e = entity.dxf.start, entity.dxf.end
             z1 = getattr(s, "z", 0.0) or 0.0
@@ -126,7 +202,9 @@ def entity_segments(entity):
                      "bulge": 0.0, "length": length, "is_arc": False}]
 
         if dxftype in ("LWPOLYLINE", "POLYLINE"):
-            return polyline_segments(entity)
+            if getattr(entity, "is_poly_face_mesh", False) or getattr(entity, "is_polygon_mesh", False):
+                return []
+            return _to_wcs(entity, polyline_segments(entity))
 
         if dxftype == "ARC":
             center = entity.dxf.center
@@ -136,16 +214,16 @@ def entity_segments(entity):
             a2 = math.radians(float(entity.dxf.end_angle))
             start = (center.x + radius * math.cos(a1), center.y + radius * math.sin(a1), z)
             end = (center.x + radius * math.cos(a2), center.y + radius * math.sin(a2), z)
-            return [{"start": start, "end": end, "bulge": None,
-                     "length": arc_entity_length(entity), "is_arc": True}]
+            return _to_wcs(entity, [{"start": start, "end": end, "bulge": None,
+                                     "length": arc_entity_length(entity), "is_arc": True}])
 
         if dxftype == "CIRCLE":
             center = entity.dxf.center
             radius = float(entity.dxf.radius)
             z = getattr(center, "z", 0.0) or 0.0
             point = (center.x + radius, center.y, z)
-            return [{"start": point, "end": point, "bulge": None,
-                     "length": 2 * math.pi * radius, "is_arc": True}]
+            return _to_wcs(entity, [{"start": point, "end": point, "bulge": None,
+                                     "length": 2 * math.pi * radius, "is_arc": True}])
     except Exception:  # pragma: no cover - entity dị dạng trong file thực tế
         return []
     return []
@@ -361,6 +439,37 @@ def insert_repeat_count(entity) -> int:
     return max(1, rows) * max(1, cols)
 
 
+def effective_block_name(entity, doc) -> tuple:
+    """Tên THẬT của block mà một INSERT tham chiếu: `(tên hiển thị, có phải block ẩn danh)`.
+
+    Block động (dynamic block) — cách vẽ phổ biến nhất của hồ sơ hiện đại: một block "VAN"
+    duy nhất có tham số chọn cỡ DN50/DN80/DN100 — được AutoCAD lưu mỗi biến thể thành một
+    block ẩn danh tên `*U12`, `*U13`... Đếm theo `insert.dxf.name` sẽ:
+
+    - xé một chủng loại thiết bị thành nhiều dòng rời rạc, và
+    - đặt tên hạng mục là `*U12` — vô nghĩa với người đọc dự toán.
+
+    Tên gốc nằm ở XDATA `AcDbBlockRepBTag` của INSERT, trỏ bằng handle tới block_record của
+    định nghĩa block động. Không tra được thì trả về chính tên ẩn danh kèm cờ để hàm gọi
+    CẢNH BÁO — thà nói rõ "có N thiết bị chưa xác định được tên" còn hơn in ra `*U12`.
+    """
+    name = getattr(entity.dxf, "name", "") or ""
+    if not name.startswith("*"):
+        return name, False
+
+    try:
+        for code, value in entity.get_xdata("AcDbBlockRepBTag"):
+            if code != 1005:
+                continue
+            target = doc.entitydb.get(value) if doc is not None else None
+            real_name = getattr(getattr(target, "dxf", None), "name", "") if target else ""
+            if real_name and not real_name.startswith("*"):
+                return real_name, False
+    except Exception:
+        pass
+    return name, True
+
+
 def _insert_transform(entity):
     """(gốc chèn, xscale, yscale, rotation độ, hệ số nhân chiều dài) của một INSERT."""
     insert = entity.dxf.insert
@@ -446,7 +555,8 @@ def explode_insert(entity, doc, max_depth: int = 8, _depth: int = 0):
             sub_segments, sub_inserts = explode_insert(child, doc, max_depth, _depth + 1)
             # Mỗi INSERT lồng bên trong là một thiết bị được chèn thật, đếm nó y như một
             # INSERT ở modelspace (nhân theo lưới MINSERT của chính nó).
-            sub_inserts = [(child.dxf.name, insert_repeat_count(child))] + list(sub_inserts)
+            child_name, _ = effective_block_name(child, doc)
+            sub_inserts = [(child_name, insert_repeat_count(child))] + list(sub_inserts)
             for dx, dy in copies:
                 for seg in sub_segments:
                     item = dict(seg)

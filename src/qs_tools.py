@@ -451,13 +451,17 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
     4. BUNG RUỘT BLOCK: đếm cả thiết bị lồng bên trong block khác và cộng tuyến ống/dây vẽ
        BÊN TRONG block (cụm WC, module ống gió lặp lại) — phần này trước đây bị bỏ sót 100%;
        một entity MINSERT (lưới hàng x cột, VD dàn đèn) được đếm đủ số bản sao thay vì đếm 1.
-    5. Đếm số lượng từng loại Block (thiết bị) theo tên + thuộc tính (attributes), cảnh báo
+    5. Đếm số lượng từng loại Block (thiết bị) theo tên + thuộc tính (attributes) — biến thể
+       Block ĐỘNG (AutoCAD lưu thành block ẩn danh `*U12`) được tra lại TÊN GỐC để không xé
+       một chủng loại thiết bị thành nhiều dòng tên vô nghĩa; cảnh báo
        riêng các Block bị insert lệch tỷ lệ (scale khác 1) vì kích thước thực tế sẽ khác chuẩn,
        và cảnh báo riêng các đối tượng thuộc Layer đang TẮT/ĐÓNG BĂNG (vẫn được tính vào khối
        lượng vì không tự đoán ý khách, nhưng nêu rõ để khách xác nhận có nên loại hay không).
     6. Cộng dồn tổng chiều dài THẬT từng tuyến ống/dây theo Layer — tính đúng cung cong
-       (bulge trong LWPOLYLINE, entity ARC/CIRCLE) thay vì chỉ đo dây cung, và cộng cả
-       chênh lệch cao độ Z nếu tuyến đi xiên giữa các cao độ.
+       (bulge trong LWPOLYLINE, entity ARC/CIRCLE, đường cong tự do SPLINE/ELLIPSE) thay vì
+       chỉ đo dây cung, cộng cả chênh lệch cao độ Z nếu tuyến đi xiên giữa các cao độ, quy
+       tọa độ OCS về WCS cho đối tượng vẽ trong UCS lật/xoay, và LOẠI lưới 3D (polyface/
+       polygon mesh) khỏi chiều dài ống vì đó là bề mặt mô hình chứ không phải tuyến.
     7. Suy ra số lượng phụ kiện co/tê/măng sông theo từng layer từ chính hình học tuyến —
        cần thiết vì ống vẽ bằng LINE/POLYLINE thuần (không chèn Block phụ kiện) trước đây
        bị bỏ sót hoàn toàn phần phụ kiện.
@@ -499,6 +503,7 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
         block_counts = {}  # (name, attrib_str) -> count
         scaled_blocks = {}  # (name, xscale, yscale) -> count
         exploded_blocks = {}  # tên block -> chiều dài tuyến lấy được từ ruột block
+        anonymous_blocks = {}  # block ẩn danh (*U…) không tra được tên gốc -> số lần chèn
         nested_block_hits = {}  # tên block lồng bên trong block khác -> số lượng
         # Ngưỡng coi hình học trong block là TUYẾN THẬT chứ không phải nét vẽ ký hiệu.
         significant_block_length_du = dwg_unit.mm(1000.0)
@@ -527,7 +532,11 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 off_frozen_layer_hits[entity_layer] = off_frozen_layer_hits.get(entity_layer, 0) + 1
 
             if dxftype == 'INSERT':
-                b_name = entity.dxf.name
+                # Block động được AutoCAD lưu thành block ẩn danh (*U12); lấy lại tên gốc
+                # để không xé một chủng loại thiết bị thành nhiều dòng tên vô nghĩa.
+                b_name, is_anonymous = cad_geometry.effective_block_name(entity, doc)
+                if is_anonymous:
+                    anonymous_blocks[b_name] = anonymous_blocks.get(b_name, 0) + 1
                 attribs = {}
                 if hasattr(entity, 'attribs') and entity.attribs:
                     for attrib in entity.attribs:
@@ -844,6 +853,15 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 f"- Đã cộng thêm ~{total_inner_m:.1f} m tuyến ống/dây vẽ BÊN TRONG Block "
                 f"({', '.join(sorted(exploded_blocks))}) — phần này nằm trong ruột block nên "
                 f"trước đây bị bóc thiếu hoàn toàn.\n"
+            )
+        if anonymous_blocks:
+            summary += (
+                f"[CẢNH BÁO] {sum(anonymous_blocks.values())} lần chèn thuộc "
+                f"{len(anonymous_blocks)} Block ẨN DANH ({', '.join(sorted(anonymous_blocks))}) — "
+                f"đây là biến thể của Block động (dynamic block) mà bản vẽ không lưu kèm tên gốc. "
+                f"Các dòng này đang mang tên kỹ thuật vô nghĩa và có thể là cùng MỘT chủng loại "
+                f"thiết bị bị tách thành nhiều dòng; cần mở bản vẽ đối chiếu và đặt lại tên hạng "
+                f"mục trước khi gửi dự toán.\n"
             )
         if nested_block_hits:
             summary += (
