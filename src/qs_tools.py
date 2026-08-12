@@ -430,6 +430,59 @@ from src import cad_loader, cad_geometry, cad_standards, cad_units  # noqa: E402
 from src.tools import normalize_mepf_parameter_spec  # noqa: E402
 from src.bim_tools import classify_layer_system, classify_block_system  # noqa: E402
 
+def aggregate_block_attributes(block_counts: dict):
+    """Gộp các lần chèn cùng một loại thiết bị lại, bỏ qua thuộc tính ĐỊNH DANH.
+
+    Thiết bị trên hồ sơ thật gần như luôn được đánh mã riêng từng cái (`TAG=L-01`,
+    `L-02`...). Gộp theo nguyên văn chuỗi thuộc tính vì thế tách 500 bộ đèn cùng chủng
+    loại thành **500 dòng "1 Bộ"** — tổng thì vẫn đúng nhưng bảng dự toán không dùng được,
+    và `calc_boq_cost` sau đó tra đơn giá 500 lần cho cùng một thứ.
+
+    Phân biệt bằng chính dữ liệu, không cần danh sách tên thuộc tính cứng: thuộc tính mà
+    MỌI lần chèn đều mang giá trị khác nhau là mã định danh (bỏ khỏi khóa gộp, giữ lại
+    trong ghi chú); thuộc tính có giá trị lặp lại là thông số kỹ thuật và PHẢI giữ trong
+    khóa gộp — 36W và 18W là hai chủng loại khác nhau, gộp chung mới là sai.
+
+    Trả về `(block_counts đã gộp, {tên block: ghi chú mã định danh})`.
+    """
+    by_name = {}
+    for (name, attr_str), count in block_counts.items():
+        try:
+            attrs = json.loads(attr_str) if attr_str else {}
+        except (ValueError, TypeError):
+            attrs = {}
+        by_name.setdefault(name, []).append((attrs, count))
+
+    aggregated, identity_notes = {}, {}
+    for name, instances in by_name.items():
+        total = sum(count for _, count in instances)
+        all_keys = {key for attrs, _ in instances for key in attrs}
+        identity_keys = set()
+        for key in all_keys:
+            values = [attrs.get(key, "") for attrs, _ in instances]
+            # Chỉ coi là mã định danh khi TỪNG lần chèn một giá trị khác nhau.
+            if total > 1 and len(set(values)) == len(values) == total:
+                identity_keys.add(key)
+
+        for attrs, count in instances:
+            spec = {k: v for k, v in attrs.items() if k not in identity_keys}
+            key = (name, json.dumps(spec, ensure_ascii=False) if spec else "")
+            aggregated[key] = aggregated.get(key, 0) + count
+
+        if identity_keys:
+            samples = []
+            for key in sorted(identity_keys):
+                values = [str(attrs.get(key, "")) for attrs, _ in instances if attrs.get(key)]
+                shown = ", ".join(values[:3]) + (", ..." if len(values) > 3 else "")
+                samples.append(f"{key} ({shown})")
+            identity_notes[name] = (
+                f"Đã gộp {total} lần chèn cùng chủng loại; mã định danh riêng từng cái: "
+                + "; ".join(samples)
+            )
+
+    return aggregated, identity_notes
+
+
 @tool
 def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_toan.xlsx",
                           max_distance: float = 2000.0, wastage_percent: float = 5.0,
@@ -582,8 +635,7 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 continue
 
             if dxftype in ('TEXT', 'MTEXT'):
-                raw = entity.dxf.text if dxftype == 'TEXT' else entity.text
-                t_str = normalize_mepf_parameter_spec((raw or '').strip())
+                t_str = normalize_mepf_parameter_spec(cad_geometry.plain_entity_text(entity))
                 pos = entity.dxf.insert
                 if t_str:
                     texts.append({"text": t_str, "pos": (pos.x, pos.y)})
@@ -764,8 +816,13 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
         unknown_layers = {}   # layer -> chiều dài (đơn vị bản vẽ)
         unknown_blocks = {}   # tên block -> số lượng
 
+        # Gộp các lần chèn cùng chủng loại, bỏ qua mã định danh riêng từng cái.
+        block_counts, identity_notes = aggregate_block_attributes(block_counts)
+
         for (b_name, attr_str), count in sorted(block_counts.items(), key=lambda x: -x[1]):
             ghi_chu = attr_str if attr_str else ""
+            if b_name in identity_notes:
+                ghi_chu = (ghi_chu + " | " if ghi_chu else "") + identity_notes[b_name]
             block_system = classify_block_system(b_name)
             if not block_system:
                 unknown_blocks[b_name] = unknown_blocks.get(b_name, 0) + count

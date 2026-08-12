@@ -142,16 +142,24 @@ def _curve_segments(entity):
     """Các đoạn xấp xỉ của SPLINE/ELLIPSE.
 
     Ống/ống gió vẽ bằng SPLINE (tuyến uốn cong tự do) hoặc ELLIPSE trước đây được đo là
-    **0 m** — bỏ sót trọn vẹn, không một dòng cảnh báo. Đánh dấu `is_arc=True` để phần suy
-    phụ kiện coi cả tuyến cong là một chỗ đổi hướng, không đếm mỗi mắt xấp xỉ là một co.
+    **0 m** — bỏ sót trọn vẹn, không một dòng cảnh báo.
     """
     points = _flattened_points(entity)
     if len(points) < 2:
         return []
     segments = []
-    for p1, p2 in zip(points[:-1], points[1:]):
+    for index, (p1, p2) in enumerate(zip(points[:-1], points[1:])):
         length = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2 + (p2[2] - p1[2]) ** 2)
-        segments.append({"start": p1, "end": p2, "bulge": None, "length": length, "is_arc": True})
+        segments.append({
+            "start": p1, "end": p2, "bulge": None, "length": length,
+            # CHỈ mắt đầu tiên mang `is_arc` — cả đường cong là MỘT chỗ đổi hướng, đúng như
+            # một entity ARC. Đánh dấu mọi mắt là cung sẽ đếm mỗi mắt xấp xỉ thành một co:
+            # một spline duy nhất từng ra 1654 cái co.
+            "is_arc": index == 0,
+            # Cờ này để phần suy phụ kiện bỏ qua các khớp nối giữa những mắt xấp xỉ — chúng
+            # là sản phẩm của phép chia nhỏ, không phải chỗ lắp phụ kiện trên công trường.
+            "flattened": True,
+        })
     return segments
 
 
@@ -289,6 +297,42 @@ def _point_on_segment_interior(point, s_start, s_end, tol: float) -> bool:
     return dist <= tol
 
 
+def _connected_run_lengths(segs, tolerance: float):
+    """Tổng chiều dài của TỪNG tuyến liên tục trong một tập đoạn (union-find theo đầu mút).
+
+    Hai đoạn chung đầu mút thuộc cùng một tuyến; tuyến là đơn vị đúng để suy số mối nối
+    ống, vì ống được cắt từ cây thương phẩm dọc theo tuyến chứ không theo từng đoạn vẽ.
+    """
+    if not segs:
+        return []
+    step = tolerance if tolerance > 0 else 1.0
+    parent = {}
+
+    def find(node):
+        parent.setdefault(node, node)
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def union(a, b):
+        root_a, root_b = find(a), find(b)
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    def key(point):
+        return (round(point[0] / step), round(point[1] / step))
+
+    for seg in segs:
+        union(key(seg["start"]), key(seg["end"]))
+
+    totals = {}
+    for seg in segs:
+        root = find(key(seg["start"]))
+        totals[root] = totals.get(root, 0.0) + seg["length"]
+    return list(totals.values())
+
+
 def _process_fittings_for_layer(args):
     layer, segs, tolerance, stock_length = args
     elbows = sum(1 for s in segs if s["is_arc"])
@@ -307,7 +351,7 @@ def _process_fittings_for_layer(args):
 
         # Co tại chỗ hai đoạn thẳng nối nhau và đổi hướng đáng kể.
         for i, a in enumerate(segs):
-            if a["is_arc"]:
+            if a["is_arc"] or a.get("flattened"):
                 continue
             px, py, _ = a["end"]
             candidates = idx.intersection((px - tolerance, py - tolerance, px + tolerance, py + tolerance))
@@ -315,7 +359,7 @@ def _process_fittings_for_layer(args):
                 if j <= i:
                     continue
                 b = segs[j]
-                if b["is_arc"] or not _same_point(a["end"], b["start"], tolerance):
+                if b["is_arc"] or b.get("flattened") or not _same_point(a["end"], b["start"], tolerance):
                     continue
                 turn = abs(math.degrees(_angle(b["start"], b["end"]) - _angle(a["start"], a["end"])))
                 turn = min(turn % 360, 360 - (turn % 360))
@@ -342,10 +386,10 @@ def _process_fittings_for_layer(args):
     else:
         # Fallback O(N^2) nếu không có rtree
         for i, a in enumerate(segs):
-            if a["is_arc"]:
+            if a["is_arc"] or a.get("flattened"):
                 continue
             for b in segs[i + 1:]:
-                if b["is_arc"] or not _same_point(a["end"], b["start"], tolerance):
+                if b["is_arc"] or b.get("flattened") or not _same_point(a["end"], b["start"], tolerance):
                     continue
                 turn = abs(math.degrees(_angle(b["start"], b["end"]) - _angle(a["start"], a["end"])))
                 turn = min(turn % 360, 360 - (turn % 360))
@@ -361,13 +405,17 @@ def _process_fittings_for_layer(args):
                     tees += 1
                     break
 
-    # Cập nhật logic măng sông: chỉ tính cho phân đoạn vượt quá stock_length,
-    # tránh cộng dồn các đoạn ống vụn dưới 6m rồi chia.
+    # Măng sông tính theo TỪNG TUYẾN LIÊN TỤC, không theo từng đoạn rời.
+    #
+    # Đếm theo đoạn (chỉ đoạn nào dài hơn một cây ống mới có mối nối) bỏ sót gần như toàn
+    # bộ hồ sơ thật: một tuyến ống 100 m luôn được vẽ thành một polyline nhiều vertex, mỗi
+    # đoạn chỉ vài mét nên KHÔNG đoạn nào vượt 6 m — ra 0 măng sông trong khi thực tế cần
+    # 16 cái. Cộng dồn cả layer thì lại thổi phồng khi bản vẽ có nhiều mẩu ống rời rạc.
+    # Gom theo tuyến liên tục xử lý đúng cả hai: mẩu 2 m đứng một mình vẫn ra 0 mối nối.
     couplings = 0
     if stock_length > 0:
-        for s in segs:
-            if s["length"] > stock_length:
-                couplings += math.floor(s["length"] / stock_length)
+        for run_length in _connected_run_lengths(segs, tolerance):
+            couplings += max(0, math.ceil(run_length / stock_length) - 1)
 
     return layer, {"co": elbows, "te": tees, "mang_song": couplings}
 
@@ -748,6 +796,25 @@ def is_scaled(entity, tolerance: float = 1e-6) -> bool:
     được đếm là "1 bộ đèn 600x600" trong khi kích thước thực tế trên bản vẽ là 900x900.
     """
     return any(abs(s - 1.0) > tolerance for s in block_scale(entity))
+
+
+def plain_entity_text(entity) -> str:
+    """Nội dung chữ THUẦN của một TEXT/MTEXT, đã bỏ mã định dạng của CAD.
+
+    MTEXT lưu kèm mã điều khiển ngay trong chuỗi (`{\\fArial|b1;Ống uPVC \\pxqc;Ø110}`) và
+    TEXT dùng mã thoát riêng (`%%c` cho Ø, `%%d` cho độ). Đọc thẳng chuỗi thô thì tên hạng
+    mục trong bảng dự toán ra đúng cả đống ký tự điều khiển — vừa không đọc được, vừa làm
+    `calc_boq_cost` không khớp nổi từ khóa đơn giá nên hạng mục bị đánh "CHƯA CÓ ĐƠN GIÁ"
+    dù bảng giá có đủ.
+    """
+    try:
+        text = entity.plain_text()
+    except Exception:
+        try:
+            text = entity.dxf.text if entity.dxftype() == "TEXT" else getattr(entity, "text", "")
+        except Exception:
+            return ""
+    return (text or "").strip()
 
 
 def parse_nominal_half_width(text: str) -> float | None:

@@ -754,13 +754,8 @@ def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) ->
             dxftype = entity.dxftype()
             layer = entity.dxf.layer
             
-            if dxftype == 'TEXT':
-                t_str = normalize_pipe_diameter_spec(entity.dxf.text.strip())
-                pos = entity.dxf.insert
-                if t_str:
-                    texts.append({"text": t_str, "pos": (pos.x, pos.y), "layer": layer})
-            elif dxftype == 'MTEXT':
-                t_str = normalize_pipe_diameter_spec(entity.text.strip())
+            if dxftype in ('TEXT', 'MTEXT'):
+                t_str = normalize_pipe_diameter_spec(cad_geometry.plain_entity_text(entity))
                 pos = entity.dxf.insert
                 if t_str:
                     texts.append({"text": t_str, "pos": (pos.x, pos.y), "layer": layer})
@@ -949,10 +944,8 @@ def audit_cad_drawing_errors(file_path: str, text_duplicate_tolerance: float = 1
         text_entries = []
         for entity in msp:
             dxftype = entity.dxftype()
-            if dxftype == "TEXT":
-                txt, pos = (entity.dxf.text or "").strip(), entity.dxf.insert
-            elif dxftype == "MTEXT":
-                txt, pos = (entity.text or "").strip(), entity.dxf.insert
+            if dxftype in ("TEXT", "MTEXT"):
+                txt, pos = cad_geometry.plain_entity_text(entity), entity.dxf.insert
             else:
                 continue
             if txt:

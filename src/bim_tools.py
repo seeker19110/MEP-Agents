@@ -176,10 +176,8 @@ def _extract_labels(msp):
     labels = []
     for entity in msp:
         dxftype = entity.dxftype()
-        if dxftype == "TEXT":
-            txt, pos = entity.dxf.text, entity.dxf.insert
-        elif dxftype == "MTEXT":
-            txt, pos = entity.text, entity.dxf.insert
+        if dxftype in ("TEXT", "MTEXT"):
+            txt, pos = cad_geometry.plain_entity_text(entity), entity.dxf.insert
         else:
             continue
         half_width = cad_geometry.parse_nominal_half_width(txt or "")
