@@ -24,6 +24,8 @@ import src.vector_search_bind  # noqa: F401
 import src.cad_loader_perf_patch  # noqa: F401
 import src.agents_perf_patch  # noqa: F401
 import src.qs_perf_patch  # noqa: F401
+import src.agents_phase_d_patch  # noqa: F401
+import src.tools_lazy  # noqa: F401
 from src import agents as _agents_mod
 supervisor_node = _agents_mod.supervisor_node
 
@@ -84,9 +86,13 @@ def route_after_tools(state: AgentState):
 workflow.add_conditional_edges("tools", route_after_tools)
 workflow.add_edge("reviewer", "supervisor")
 
+def _route_supervisor(state):
+    from src.graph_parallel import route_supervisor
+    return route_supervisor(state)
+
 workflow.add_conditional_edges(
     "supervisor",
-    lambda state: state.get("next", "FINISH"),
+    _route_supervisor,
     {
         "mechanical": "mechanical",
         "electrical": "electrical",
@@ -110,7 +116,6 @@ def build_checkpointer(db_path: str = None):
             return pg
     except Exception as e:
         logger.warning("Postgres checkpointer skip: %s", e)
-
     if not db_path:
         return MemorySaver()
     try:

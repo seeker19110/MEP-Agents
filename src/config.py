@@ -36,10 +36,15 @@ class Settings(BaseSettings):
     yolo_weights: str = ""
     yolo_confidence: float = 0.25
 
-    # --- Perf: LLM context + CAD cache knobs ---
     agent_message_window: int = 24
     max_tool_result_chars: int = 6000
     cad_cache_max: int = 8
+
+    embedding_backend: str = ""
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_embed_model: str = "nomic-embed-text"
+    local_embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    hybrid_search: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
