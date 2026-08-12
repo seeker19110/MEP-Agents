@@ -100,6 +100,20 @@ def classify_layer_system(layer_name: str) -> str:
     return ""
 
 
+def classify_block_system(block_name: str) -> str:
+    """Suy ra hệ kỹ thuật của một Block thiết bị từ tên; '' nếu không nhận ra.
+
+    Cùng vai trò với `classify_layer_system` nhưng cho Block, tra qua
+    `cad_standards.match_block` (bảng `BLOCK_STANDARD`). Dùng để tách thiết bị MEPF thật
+    ra khỏi Block nền kiến trúc (cửa, cầu thang, bàn ghế) khi lập bảng khối lượng.
+    """
+    key = cad_standards.match_block(block_name)
+    if not key:
+        return ""
+    discipline = cad_standards.BLOCK_STANDARD[key].get("discipline", "")
+    return _DISCIPLINE_TO_VN.get(discipline, "")
+
+
 def _segment_intersection(a1, a2, b1, b2):
     """Giao điểm của hai đoạn thẳng 2D, hoặc None nếu không cắt nhau.
 

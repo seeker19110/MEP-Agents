@@ -30,6 +30,10 @@ DEFAULT_OVERHEAD_PERCENT = 6.5   # chi phí chung, % trên chi phí trực tiế
 DEFAULT_PROFIT_PERCENT = 5.5     # thu nhập chịu thuế tính trước, % trên (trực tiếp + chung)
 DEFAULT_VAT_PERCENT = 10.0       # thuế GTGT
 
+# Nhãn cho dòng khối lượng không tra được hệ MEPF nào. Không im lặng bỏ đi: layer đặt tên
+# tự do vẫn có thể là tuyến MEPF thật, nên đánh dấu để kỹ sư quyết định thay vì tự loại.
+UNKNOWN_SYSTEM_LABEL = "CHƯA XÁC ĐỊNH HỆ"
+
 
 def _strip_accents(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", str(text)) if unicodedata.category(c) != "Mn")
@@ -424,13 +428,13 @@ import pandas as pd  # noqa: E402
 from ezdxf import audit  # noqa: E402
 from src import cad_loader, cad_geometry, cad_standards, cad_units  # noqa: E402
 from src.tools import normalize_mepf_parameter_spec  # noqa: E402
-from src.bim_tools import classify_layer_system  # noqa: E402
+from src.bim_tools import classify_layer_system, classify_block_system  # noqa: E402
 
 @tool
 def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_toan.xlsx",
                           max_distance: float = 2000.0, wastage_percent: float = 5.0,
                           pipe_stock_length_mm: float = 6000.0,
-                          drawing_unit: str = "") -> str:
+                          drawing_unit: str = "", mep_only: bool = False) -> str:
     """Bóc tách khối lượng TỰ ĐỘNG & TOÀN DIỆN từ file CAD (.dxf/.dwg) và xuất thẳng ra
     Excel CHỈ BẰNG MỘT LẦN GỌI TOOL DUY NHẤT — không cần LLM tự đếm block, tự cộng chiều
     dài hay tự soạn JSON (những bước dễ sai với model AI yếu/model chạy offline qua Ollama).
@@ -473,7 +477,15 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
        gần nhất.
     9. Cộng % hao hụt vật tư (`wastage_percent`, mặc định 5%) vào khối lượng ống/dây — số đo
        hình học thuần luôn thấp hơn khối lượng cần mua thực tế do cắt nối, bù trừ khi thi công.
-    10. Ghi toàn bộ kết quả (STT, Hạng mục, Đơn vị, Khối lượng, Ghi chú) ra file Excel thật.
+    10. PHÂN LOẠI HỆ cho từng dòng (cột 'Hệ') và cảnh báo riêng phần KHÔNG tra được hệ MEPF —
+       bản vẽ thật luôn kèm nền kiến trúc (tường, trục, cửa) và lớp trình bày (đường kích
+       thước, ghi chú), tính chúng vào dự toán là sai hoàn toàn. Mặc định vẫn GIỮ các dòng
+       này (layer MEPF đặt tên tự do cũng rơi vào nhóm đó, tự loại sẽ thành bóc thiếu âm
+       thầm); đặt `mep_only=True` khi đã xác nhận đúng là nền kiến trúc để loại hẳn.
+    11. CẢNH BÁO tuyến vẽ bằng HAI NÉT SONG SONG (hai mép ống gió/ống nước cỡ lớn) — kiểu
+       thể hiện này làm chiều dài bị TÍNH ĐÔI. Chỉ cảnh báo, không tự trừ, vì hai tuyến
+       riêng biệt chạy song song sát nhau trông y hệt và trừ nhầm sẽ thành bóc thiếu một nửa.
+    12. Ghi toàn bộ kết quả (STT, Hạng mục, Hệ, Đơn vị, Khối lượng, Ghi chú) ra file Excel thật.
     Dùng tool này làm bước ĐẦU TIÊN VÀ DUY NHẤT khi cần bóc khối lượng/lập dự toán từ CAD;
     chỉ cần dùng `read_cad`/`analyze_cad_spatial_context` riêng lẻ khi cần phân tích sâu hơn.
     """
@@ -736,25 +748,47 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                     bucket = layer_labels.setdefault(best_layer, {})
                     bucket[t["text"]] = bucket.get(t["text"], 0) + 1
 
+        # Tuyến vẽ bằng 2 nét song song (hai mép ống gió/ống nước cỡ lớn) bị cộng dồn thành
+        # gấp đôi chiều dài thật. Chỉ cảnh báo, không tự trừ — xem `detect_double_line_runs`.
+        double_line_by_layer = cad_geometry.detect_double_line_runs(
+            all_segments, max_width=dwg_unit.mm(cad_geometry.DEFAULT_DOUBLE_LINE_MAX_WIDTH),
+            min_separation=joint_tolerance_du)
+
         fittings_by_layer = cad_geometry.detect_fittings(
             all_segments, stock_length=stock_length_du, tolerance=joint_tolerance_du)
 
         rows = []
         stt = 1
+        # Dòng KHÔNG nhận diện được hệ MEPF thường là nền kiến trúc (tường, trục, cửa) hoặc
+        # lớp trình bày (dim, ghi chú) lẫn trong file — xem `UNKNOWN_SYSTEM_LABEL`.
+        unknown_layers = {}   # layer -> chiều dài (đơn vị bản vẽ)
+        unknown_blocks = {}   # tên block -> số lượng
+
         for (b_name, attr_str), count in sorted(block_counts.items(), key=lambda x: -x[1]):
             ghi_chu = attr_str if attr_str else ""
+            block_system = classify_block_system(b_name)
+            if not block_system:
+                unknown_blocks[b_name] = unknown_blocks.get(b_name, 0) + count
             # Đơn vị tra theo loại Block (đèn/ổ cắm/đầu phun... = "Cái", cụm thiết bị
             # trọn bộ như FCU/bơm = "Bộ") qua cad_standards.BLOCK_STANDARD, khớp thói
             # quen hồ sơ thầu VN — "Bộ" chỉ còn là dự phòng khi không nhận diện được
             # Block (trước đây gán cứng "Bộ" cho mọi Block bất kể loại).
             block_key = cad_standards.match_block(b_name)
             unit = cad_standards.BLOCK_STANDARD[block_key]["unit"] if block_key else "Bộ"
-            rows.append({"STT": stt, "Hạng mục": b_name, "Đơn vị": unit, "Khối lượng": count, "Ghi chú": ghi_chu})
+            if mep_only and not block_system:
+                continue
+            rows.append({"STT": stt, "Hạng mục": b_name, "Hệ": block_system or UNKNOWN_SYSTEM_LABEL,
+                         "Đơn vị": unit, "Khối lượng": count, "Ghi chú": ghi_chu})
             stt += 1
 
         for layer, length in sorted(layer_lengths.items(), key=lambda x: -x[1]):
             if length <= 0:
                 continue
+            layer_system = layer_systems.get(layer) or classify_layer_system(layer)
+            if not layer_system:
+                unknown_layers[layer] = length
+                if mep_only:
+                    continue
             label = layer
             note = f"Layer: {layer}"
             if layer in layer_labels:
@@ -769,8 +803,8 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
             length_with_wastage_m = length_m * (1 + wastage_percent / 100.0)
             if wastage_percent > 0:
                 note += f" (đã cộng {wastage_percent:.0f}% hao hụt vật tư)"
-            rows.append({"STT": stt, "Hạng mục": label, "Đơn vị": "m",
-                        "Khối lượng": round(length_with_wastage_m, 2), "Ghi chú": note})
+            rows.append({"STT": stt, "Hạng mục": label, "Hệ": layer_system or UNKNOWN_SYSTEM_LABEL,
+                        "Đơn vị": "m", "Khối lượng": round(length_with_wastage_m, 2), "Ghi chú": note})
             stt += 1
 
             fittings = fittings_by_layer.get(layer, {})
@@ -779,13 +813,21 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 if qty <= 0:
                     continue
                 rows.append({
-                    "STT": stt, "Hạng mục": f"{fitting_labels[key]} - {label}", "Đơn vị": "Cái",
+                    "STT": stt, "Hạng mục": f"{fitting_labels[key]} - {label}",
+                    "Hệ": layer_system or UNKNOWN_SYSTEM_LABEL, "Đơn vị": "Cái",
                     "Khối lượng": qty,
                     "Ghi chú": f"Suy từ hình học tuyến (Layer: {layer}) — cần đối chiếu bản vẽ chi tiết",
                 })
                 stt += 1
 
         if not rows:
+            if mep_only and (unknown_layers or unknown_blocks):
+                return (
+                    "Đang bật `mep_only=True` nên mọi hạng mục đều bị loại: không tra được hệ "
+                    "MEPF cho bất kỳ Layer/Block nào trong bản vẽ. Nhiều khả năng bản vẽ đặt tên "
+                    "layer tự do — chạy `standardize_cad_drawing` để chuẩn hóa tên layer, hoặc "
+                    "bóc lại với `mep_only=False` rồi tự lọc theo cột 'Hệ'."
+                )
             return "Không tìm thấy Block hoặc tuyến ống/dây nào trong bản vẽ để bóc khối lượng."
 
         out_path = output_excel_path if output_excel_path.endswith('.xlsx') else output_excel_path + '.xlsx'
@@ -836,6 +878,37 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 + ", ".join(sorted(xref_overlap_layers)) + ". "
                 "Thường do khách VẼ LẠI (trace) nội dung xref vào bản vẽ chính khi gộp thủ công "
                 "nhiều nguồn — kiểm tra kỹ trước khi dùng khối lượng này, có thể đang bị TÍNH ĐÔI.\n\n"
+            )
+
+        if unknown_layers or unknown_blocks:
+            parts = []
+            if unknown_layers:
+                total_unknown_m = dwg_unit.length_m(sum(unknown_layers.values()))
+                parts.append(f"{len(unknown_layers)} Layer với ~{total_unknown_m:.1f} m "
+                             f"({', '.join(sorted(unknown_layers))})")
+            if unknown_blocks:
+                parts.append(f"{sum(unknown_blocks.values())} Block "
+                             f"({', '.join(sorted(unknown_blocks))})")
+            summary += (
+                "[CẢNH BÁO NGHIÊM TRỌNG] Không tra được hệ MEPF cho: " + "; ".join(parts) + ". "
+                "Đây thường là NỀN KIẾN TRÚC (tường, trục định vị, cửa) hoặc lớp trình bày "
+                "(đường kích thước, ghi chú, khung tên) lẫn trong file — tính vào dự toán là "
+                "SAI HOÀN TOÀN, và các dòng phụ kiện co/tê/măng sông suy ra từ chúng cũng vô "
+                "nghĩa theo. Các dòng này được đánh dấu '" + UNKNOWN_SYSTEM_LABEL + "' ở cột "
+                "'Hệ' để rà nhanh; loại bỏ chúng rồi bóc lại bằng `mep_only=True` nếu đúng là "
+                "nền kiến trúc (mặc định đang GIỮ chúng lại). Layer MEPF thật nhưng đặt tên tự do cũng rơi vào nhóm này — "
+                "hãy chạy `standardize_cad_drawing` để chuẩn hóa tên layer trước khi bóc.\n\n"
+            )
+        if double_line_by_layer:
+            total_double_m = dwg_unit.length_m(sum(double_line_by_layer.values()))
+            summary += (
+                f"[CẢNH BÁO NGHIÊM TRỌNG] Phát hiện ~{total_double_m:.1f} m tuyến có thể đang được "
+                f"vẽ bằng HAI NÉT SONG SONG (hai mép ống, kiểu thể hiện quen thuộc của ống gió và "
+                f"ống nước cỡ lớn), tại các Layer: " + ", ".join(sorted(double_line_by_layer)) + ". "
+                "Nếu đúng vậy thì chiều dài các tuyến này đang bị TÍNH ĐÔI và phải lấy một nửa. "
+                "Tool KHÔNG tự trừ vì hai tuyến riêng biệt chạy song song sát nhau (VD ống cấp và "
+                "ống hồi đi cùng trục) trông y hệt — trừ nhầm sẽ thành bóc thiếu đúng một nửa. "
+                "Hãy mở bản vẽ đối chiếu cách thể hiện rồi tự quyết định.\n\n"
             )
 
         summary += (

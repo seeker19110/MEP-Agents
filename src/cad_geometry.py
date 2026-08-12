@@ -439,6 +439,81 @@ def insert_repeat_count(entity) -> int:
     return max(1, rows) * max(1, cols)
 
 
+# Khoảng cách tối đa giữa hai nét của cùng một tuyến vẽ kiểu 2 nét song song (đơn vị bản
+# vẽ, theo mm). 2000 mm phủ hết cỡ ống gió/ống nước thường gặp; xa hơn nữa thì hai nét
+# nhiều khả năng là hai tuyến riêng biệt chứ không phải hai mép của một tuyến.
+DEFAULT_DOUBLE_LINE_MAX_WIDTH = 2000.0
+
+# Hai đoạn phải chồng nhau ít nhất bằng tỷ lệ này (trên đoạn ngắn hơn) mới coi là hai mép
+# của cùng một tuyến, tránh bắt nhầm hai tuyến chỉ tình cờ chạm nhau một khúc ngắn.
+_DOUBLE_LINE_MIN_OVERLAP_RATIO = 0.6
+
+# Sai lệch góc tối đa (độ) để coi hai đoạn là song song.
+_PARALLEL_ANGLE_TOLERANCE_DEG = 2.0
+
+
+def detect_double_line_runs(segments, max_width: float = DEFAULT_DOUBLE_LINE_MAX_WIDTH,
+                            min_separation: float = JOINT_TOLERANCE) -> dict:
+    """Ước tính chiều dài bị TÍNH ĐÔI do tuyến vẽ bằng 2 nét song song, theo từng layer.
+
+    Ống gió và ống nước cỡ lớn hầu như luôn được thể hiện bằng HAI nét song song (hai mép
+    ống) chứ không phải một đường tâm. Cộng dồn chiều dài hình học sẽ ra **gấp đôi** chiều
+    dài tuyến thật, và bảng dự toán không có bất kỳ dấu hiệu nào để nhận ra.
+
+    Đây chỉ là CẢNH BÁO, không tự trừ: hai tuyến MEPF riêng biệt chạy song song sát nhau
+    (rất phổ biến — cấp và hồi đi cùng trục) trông y hệt hai mép của một ống. Máy không
+    phân biệt được hai trường hợp này, nên quyết định cuối cùng phải thuộc về kỹ sư; sai
+    lầm ở đây mà tự trừ thì lại thành bóc THIẾU đúng một nửa.
+
+    Trả về `{layer: chiều dài nghi tính đôi}`. Thuật toán gom đoạn theo (layer, hướng) rồi
+    chỉ so các đoạn có khoảng lệch vuông góc đủ nhỏ, nên không phải so từng cặp toàn bản vẽ.
+    """
+    buckets = {}
+    for seg in segments:
+        (x1, y1, _), (x2, y2, _) = seg["start"], seg["end"]
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length <= 0:
+            continue
+        # Góc không hướng (0..180): hai nét của một ống có thể được vẽ ngược chiều nhau.
+        angle = math.degrees(math.atan2(dy, dx)) % 180.0
+        key = (seg["layer"], round(angle / _PARALLEL_ANGLE_TOLERANCE_DEG))
+        ux, uy = dx / length, dy / length
+        # Pháp tuyến: khoảng lệch của hai đường song song chính là hiệu `offset`.
+        offset = -uy * x1 + ux * y1
+        t1, t2 = ux * x1 + uy * y1, ux * x2 + uy * y2
+        buckets.setdefault(key, []).append(
+            {"offset": offset, "lo": min(t1, t2), "hi": max(t1, t2), "length": length}
+        )
+
+    doubled = {}
+    for (layer, _), items in buckets.items():
+        items.sort(key=lambda it: it["offset"])
+        used = [False] * len(items)
+        for i, first in enumerate(items):
+            if used[i]:
+                continue
+            for j in range(i + 1, len(items)):
+                if used[j]:
+                    continue
+                second = items[j]
+                gap = second["offset"] - first["offset"]
+                if gap > max_width:
+                    break  # đã sắp xếp theo offset nên các đoạn sau còn xa hơn
+                if gap < min_separation:
+                    continue  # trùng khít nhau là hình học overkill, đã có cảnh báo riêng
+                overlap = min(first["hi"], second["hi"]) - max(first["lo"], second["lo"])
+                if overlap <= 0:
+                    continue
+                if overlap < _DOUBLE_LINE_MIN_OVERLAP_RATIO * min(first["length"], second["length"]):
+                    continue
+                used[i] = used[j] = True
+                doubled[layer] = doubled.get(layer, 0.0) + overlap
+                break
+
+    return doubled
+
+
 def effective_block_name(entity, doc) -> tuple:
     """Tên THẬT của block mà một INSERT tham chiếu: `(tên hiển thị, có phải block ẩn danh)`.
 
