@@ -10,6 +10,13 @@ import ezdxf
 
 logger = logging.getLogger(__name__)
 
+# Giữ tham chiếu tới hàm gốc NGAY khi import: `cad_loader_perf_patch` tạm thời gán
+# `ezdxf.readfile = readfile_cached` khi đọc xref, nên nếu ở đây gọi qua
+# `ezdxf.readfile` thì mỗi lần cache miss sẽ tự gọi lại chính mình → đệ quy vô hạn
+# (biểu hiện: "Không đọc được XREF ...: maximum recursion depth exceeded", nội dung
+# xref bị bỏ khỏi khối lượng).
+_ezdxf_readfile = ezdxf.readfile
+
 _LOCK = threading.Lock()
 _CACHE: dict[tuple[str, int, int], Any] = {}
 _MAX_ENTRIES = int(os.environ.get("CAD_CACHE_MAX", "8"))
@@ -26,14 +33,14 @@ def _key(path: str) -> tuple[str, int, int] | None:
 def readfile_cached(path: str):
     k = _key(path)
     if k is None:
-        return ezdxf.readfile(path)
+        return _ezdxf_readfile(path)
     with _LOCK:
         doc = _CACHE.get(k)
         if doc is not None:
             logger.debug("CAD cache HIT %s", path)
             return doc
     logger.debug("CAD cache MISS %s", path)
-    doc = ezdxf.readfile(path)
+    doc = _ezdxf_readfile(path)
     with _LOCK:
         _CACHE[k] = doc
         while len(_CACHE) > _MAX_ENTRIES:

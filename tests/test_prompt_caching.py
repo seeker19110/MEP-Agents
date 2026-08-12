@@ -66,12 +66,22 @@ def test_role_specific_provider_wins(monkeypatch):
 
 # --- Tool search (beta Anthropic) ---
 
+def _expected_role_tools(role: str):
+    """Bộ tool "không bật tool search" mà build_tools_for_llm phải trả về: tool của vai
+    trò cộng thêm replace_blocks_by_mapping cho CAD/QS (xem docstring build_tools_for_llm)."""
+    from src import agents
+    tools = list(agents.get_tools_for_role(role))
+    if role.lower().strip() in ("cad", "qs") and agents.replace_blocks_by_mapping not in tools:
+        tools.append(agents.replace_blocks_by_mapping)
+    return tools
+
 def test_tool_search_off_by_default(monkeypatch):
     """Beta đặc thù Anthropic, không kiểm chứng được nếu thiếu API key thật => mặc định tắt."""
     monkeypatch.delenv("ANTHROPIC_TOOL_SEARCH", raising=False)
-    from src.agents import build_tools_for_llm
-    from src.tools import get_tools_for_role
-    assert build_tools_for_llm("cad", "anthropic") == get_tools_for_role("cad")
+    from src import agents
+    # So với bộ tool của vai trò như chính agents nhìn thấy (đã gắn thêm skill Phase A),
+    # chứ không phải bản gốc trong tools.py.
+    assert agents.build_tools_for_llm("cad", "anthropic") == _expected_role_tools("cad")
 
 
 def test_tool_search_defers_business_tools_but_not_itself(monkeypatch):
@@ -85,10 +95,9 @@ def test_tool_search_defers_business_tools_but_not_itself(monkeypatch):
 
 def test_tool_search_never_applies_to_other_providers(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_TOOL_SEARCH", "true")
-    from src.agents import build_tools_for_llm
-    from src.tools import get_tools_for_role
+    from src import agents
     for provider in ("openai", "groq", "gemini", "ollama"):
-        assert build_tools_for_llm("cad", provider) == get_tools_for_role("cad")
+        assert agents.build_tools_for_llm("cad", provider) == _expected_role_tools("cad")
 
 
 def test_tool_search_skipped_when_role_has_few_tools(monkeypatch):
@@ -96,5 +105,4 @@ def test_tool_search_skipped_when_role_has_few_tools(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_TOOL_SEARCH", "true")
     from src import agents
     monkeypatch.setattr(agents, "TOOL_SEARCH_MIN_TOOLS", 999)
-    from src.tools import get_tools_for_role
-    assert agents.build_tools_for_llm("cad", "anthropic") == get_tools_for_role("cad")
+    assert agents.build_tools_for_llm("cad", "anthropic") == _expected_role_tools("cad")
