@@ -51,12 +51,15 @@ def test_auto_quantity_takeoff_writes_excel_with_blocks_and_pipe_length(workspac
     assert (df["Hạng mục"] == "SOCKET").any()
     socket_row = df[df["Hạng mục"] == "SOCKET"].iloc[0]
     assert socket_row["Khối lượng"] == 2
-    assert socket_row["Đơn vị"] == "Bộ"
+    # Ổ cắm là thiết bị đếm rời -> "Cái" (theo cad_standards.BLOCK_STANDARD["SOCKET"]),
+    # không phải "Bộ" mặc định cho mọi Block như trước.
+    assert socket_row["Đơn vị"] == "Cái"
 
     # Tuyến ống phải được đặt tên theo ghi chú gần nhất thay vì tên layer thô
     assert (df["Hạng mục"] == "Ống uPVC Ø110 (D110)").any()
     pipe_row = df[df["Hạng mục"] == "Ống uPVC Ø110 (D110)"].iloc[0]
-    assert pipe_row["Khối lượng"] == pytest.approx(500.0, rel=1e-3)
+    # Đường vẽ dài 500 đơn vị bản vẽ (mm) -> 0.5 m sau khi quy đổi.
+    assert pipe_row["Khối lượng"] == pytest.approx(0.5, rel=1e-3)
 
 
 def test_wastage_percent_is_added_by_default(workspace):

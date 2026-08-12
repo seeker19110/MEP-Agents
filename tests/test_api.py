@@ -94,7 +94,8 @@ def test_download_returns_file_when_task_succeeded_and_file_exists(client, monke
     assert resp.content == b"fake excel bytes"
 
 
-def test_revit_analyze_counts_ducts_and_pipes(client):
+def test_revit_analyze_counts_ducts_and_pipes(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "UPLOAD_DIR", str(tmp_path))
     payload = {
         "project_name": "Tòa nhà A",
         "elements": [
@@ -110,6 +111,52 @@ def test_revit_analyze_counts_ducts_and_pipes(client):
     assert "Đã nhận 4 cấu kiện" in message
     assert "Ống gió: 2" in message
     assert "Ống nước: 1" in message
+
+
+def test_revit_analyze_builds_real_boq_from_length_mm(client, tmp_path, monkeypatch):
+    """Trước đây /api/v1/revit/analyze chỉ đếm cấu kiện, không hề dùng `length_mm` mà
+    plugin Revit gửi lên -> khác hoàn toàn luồng AutoCAD (có bóc khối lượng thật). Nay
+    phải cộng dồn length_mm, quy đổi mm->m, cộng hao hụt, và cho tải file Excel về."""
+    monkeypatch.setattr(api, "UPLOAD_DIR", str(tmp_path))
+    payload = {
+        "project_name": "Tòa nhà B",
+        "wastage_percent": 10,
+        "elements": [
+            {"category": "Pipe", "name": "Ống uPVC D110", "length_mm": 4000},
+            {"category": "Pipe", "name": "Ống uPVC D110", "length_mm": 2000},
+            {"category": "Pipe Fitting", "name": "Co 90", "length_mm": None},
+            {"category": "Pipe Fitting", "name": "Co 90"},
+        ],
+    }
+    resp = client.post("/api/v1/revit/analyze", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "boq_filename" in body
+    assert "Tải về" in body["message"]
+
+    download_resp = client.get(f"/api/v1/revit/download/{body['boq_filename']}")
+    assert download_resp.status_code == 200
+
+    import io
+    import pandas as pd
+    df = pd.read_excel(io.BytesIO(download_resp.content))
+    pipe_row = df[df["Hạng mục"] == "Ống uPVC D110"].iloc[0]
+    assert pipe_row["Đơn vị"] == "m"
+    # (4000 + 2000) mm = 6 m, cộng 10% hao hụt = 6.6 m
+    assert pipe_row["Khối lượng"] == pytest.approx(6.6, rel=1e-6)
+
+    fitting_row = df[df["Hạng mục"] == "Co 90"].iloc[0]
+    assert fitting_row["Đơn vị"] == "Cái"
+    assert fitting_row["Khối lượng"] == 2
+
+
+def test_revit_download_rejects_path_traversal(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "UPLOAD_DIR", str(tmp_path))
+    # FastAPI tự chặn "%2F" (slash mã hóa) ở tầng routing (404) trước khi vào tới
+    # handler; nếu request nào lọt qua được thì os.path.basename()/kiểm tra UPLOAD_DIR
+    # trong handler vẫn phải chặn — không có đường nào rò rỉ file ngoài UPLOAD_DIR.
+    resp = client.get("/api/v1/revit/download/..%2F..%2Fetc%2Fpasswd")
+    assert resp.status_code == 404 or resp.json() == {"error": "File not found"}
 
 
 def test_autocad_analyze_reports_missing_file(client):

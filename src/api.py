@@ -1,4 +1,5 @@
 import os
+import uuid
 import aiofiles
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,6 +7,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from celery.result import AsyncResult
 from src.celery_app import app as celery_app, parse_cad_to_db_task
+# Import qua `src.tools` (không import trực tiếp `src.qs_tools`) để tránh vòng import:
+# `qs_tools` import từ `tools` ở module-level, nên nếu tiến trình import `qs_tools`
+# TRƯỚC khi `tools` từng được nạp, `tools` sẽ cố import ngược lại `qs_tools` khi nó
+# còn dở dang -> ImportError. Nạp qua `tools` (điểm vào an toàn, tự xử lý đúng thứ tự)
+# tránh được vòng lặp này.
+from src.tools import build_revit_boq_excel
 from src.workspace import get_project_root
 
 app = FastAPI(
@@ -32,6 +39,7 @@ class TaskResponse(BaseModel):
 class RevitPayload(BaseModel):
     project_name: str
     elements: list[dict]
+    wastage_percent: float = 5.0
 
 class AutoCADPayload(BaseModel):
     project_name: str
@@ -90,19 +98,43 @@ def download_boq(task_id: str):
 @app.post("/api/v1/revit/analyze")
 async def analyze_revit_model(payload: RevitPayload):
     """
-    Nhận gói dữ liệu 3D JSON từ pyRevit Plugin, phân tích bởi Agentic Swarm.
+    Nhận gói dữ liệu 3D JSON từ pyRevit Plugin và LẬP BOQ THẬT ngay (khối lượng ống/gió
+    quy đổi mm -> m + hao hụt, phụ kiện/thiết bị đếm theo Cái) — dùng chung quy ước đơn
+    vị/hao hụt với `auto_quantity_takeoff` (luồng AutoCAD) qua `build_revit_boq_excel`,
+    để hai luồng cho ra kết quả tương đương, đối chiếu được trực tiếp, thay vì Revit chỉ
+    đếm số cấu kiện như trước.
     """
     total_elements = len(payload.elements)
     ducts = sum(1 for el in payload.elements if "Duct" in el.get("category", ""))
     pipes = sum(1 for el in payload.elements if "Pipe" in el.get("category", ""))
-    
+
+    filename = f"BOQ_Revit_{uuid.uuid4().hex[:8]}.xlsx"
+    excel_path = os.path.join(UPLOAD_DIR, filename)
+    written_path = build_revit_boq_excel(payload.elements, excel_path,
+                                          wastage_percent=payload.wastage_percent)
+
     message = f"Dự án: {payload.project_name}\n"
     message += f"Đã nhận {total_elements} cấu kiện.\n"
     message += f" - Ống gió: {ducts}\n"
     message += f" - Ống nước: {pipes}\n"
-    message += "\nAgentic Swarm đã xác nhận không gian 3D BIM và chuẩn bị lập bảng Bóc tách Khối lượng (BOQ)!"
-    
+    if written_path:
+        message += (f"\nĐã lập bảng khối lượng (BOQ) thật, đã cộng {payload.wastage_percent:.0f}% "
+                     f"hao hụt vật tư. Tải về tại /api/v1/revit/download/{filename}")
+        return {"status": "success", "message": message, "boq_filename": filename}
+
+    message += "\nKhông có cấu kiện MEP nào có thể bóc khối lượng trong mô hình này."
     return {"status": "success", "message": message}
+
+
+@app.get("/api/v1/revit/download/{filename}")
+def download_revit_boq(filename: str):
+    # `filename` do chính server sinh ra (uuid + đuôi cố định) ở analyze_revit_model,
+    # nhưng vẫn chặn path traversal (../) và giới hạn vào đúng UPLOAD_DIR để an toàn.
+    safe_name = os.path.basename(filename)
+    excel_path = os.path.join(UPLOAD_DIR, safe_name)
+    if not excel_path.startswith(UPLOAD_DIR) or not os.path.exists(excel_path):
+        return {"error": "File not found"}
+    return FileResponse(excel_path, filename=safe_name)
 
 @app.post("/api/v1/autocad/analyze")
 async def analyze_autocad_model(payload: AutoCADPayload):
