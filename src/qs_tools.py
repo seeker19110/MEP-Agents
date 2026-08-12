@@ -434,25 +434,47 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
     Quy trình bên trong (thuần toán học/hình học, KHÔNG dùng LLM):
     1. Nạp bản vẽ (tự chuyển .dwg sang .dxf nếu cần, tự gộp nội dung XREF nếu có) và audit
        làm sạch cấu trúc file.
-    2. Đếm số lượng từng loại Block (thiết bị) theo tên + thuộc tính (attributes), cảnh báo
+    2. KIỂM TRA ĐƠN VỊ BẢN VẼ (INSUNITS) — nếu khác Millimet, cảnh báo NGHIÊM TRỌNG ngay đầu
+       báo cáo vì mọi chiều dài tính ra sau đó có thể sai lệch hàng chục-hàng nghìn lần.
+    3. PHÁT HIỆN HÌNH HỌC TRÙNG LẶP (overkill) trước khi cộng chiều dài — nếu bản vẽ chưa
+       qua `optimize_cad_drawing`, các đoạn ống bị trace/copy chồng đè sẽ bị cộng dồn thừa;
+       tool cảnh báo tổng chiều dài nghi trùng lặp theo layer thay vì âm thầm tính sai.
+    4. Đếm số lượng từng loại Block (thiết bị) theo tên + thuộc tính (attributes), cảnh báo
        riêng các Block bị insert lệch tỷ lệ (scale khác 1) vì kích thước thực tế sẽ khác chuẩn.
-    3. Cộng dồn tổng chiều dài THẬT từng tuyến ống/dây theo Layer — tính đúng cung cong
+    5. Cộng dồn tổng chiều dài THẬT từng tuyến ống/dây theo Layer — tính đúng cung cong
        (bulge trong LWPOLYLINE, entity ARC/CIRCLE) thay vì chỉ đo dây cung, và cộng cả
        chênh lệch cao độ Z nếu tuyến đi xiên giữa các cao độ.
-    4. Suy ra số lượng phụ kiện co/tê/măng sông theo từng layer từ chính hình học tuyến —
+    6. Suy ra số lượng phụ kiện co/tê/măng sông theo từng layer từ chính hình học tuyến —
        cần thiết vì ống vẽ bằng LINE/POLYLINE thuần (không chèn Block phụ kiện) trước đây
        bị bỏ sót hoàn toàn phần phụ kiện.
-    5. Liên kết Ghi chú văn bản (TEXT/MTEXT, ví dụ 'Ống uPVC Ø110') với Layer ống gần nhất
+    7. Liên kết Ghi chú văn bản (TEXT/MTEXT, ví dụ 'Ống uPVC Ø110') với Layer ống gần nhất
        (Spatial Matching) để đặt tên hạng mục đúng theo bản vẽ thay vì chỉ ghi tên Layer thô.
-    6. Cộng % hao hụt vật tư (`wastage_percent`, mặc định 5%) vào khối lượng ống/dây — số đo
+    8. Cộng % hao hụt vật tư (`wastage_percent`, mặc định 5%) vào khối lượng ống/dây — số đo
        hình học thuần luôn thấp hơn khối lượng cần mua thực tế do cắt nối, bù trừ khi thi công.
-    7. Ghi toàn bộ kết quả (STT, Hạng mục, Đơn vị, Khối lượng, Ghi chú) ra file Excel thật.
+    9. Ghi toàn bộ kết quả (STT, Hạng mục, Đơn vị, Khối lượng, Ghi chú) ra file Excel thật.
     Dùng tool này làm bước ĐẦU TIÊN VÀ DUY NHẤT khi cần bóc khối lượng/lập dự toán từ CAD;
     chỉ cần dùng `read_cad`/`analyze_cad_spatial_context` riêng lẻ khi cần phân tích sâu hơn.
     """
     logger.info("Auto Quantity Takeoff (offline, deterministic): %s -> %s", file_path, output_excel_path)
     try:
         doc, load_notes = cad_loader.load_drawing(file_path)
+
+        # Kiểm tra đơn vị bản vẽ TRƯỚC KHI tính toán — sai đơn vị làm SAI LỆCH mọi chiều dài
+        # tính ra sau đó (hàng chục đến hàng nghìn lần) dù hình học và tổng dòng dự toán trông
+        # hoàn toàn bình thường, nên phải cảnh báo ngay tại đây thay vì chỉ ở tool audit riêng
+        # (`audit_cad_drawing_errors`) mà người dùng có thể quên gọi trước khi bóc khối lượng.
+        insunits = doc.header.get('$INSUNITS', 0)
+        insunits_warning = None
+        if insunits != 4:
+            unit_names = {0: "Không xác định (Unitless)", 1: "Inch", 2: "Feet", 5: "Centimet (cm)",
+                         6: "Met (m)", 8: "Microinch", 9: "Mil"}
+            unit_name = unit_names.get(insunits, f"Mã INSUNITS={insunits} (không xác định)")
+            insunits_warning = (
+                f"[CẢNH BÁO NGHIÊM TRỌNG] Đơn vị bản vẽ là '{unit_name}', KHÔNG PHẢI Millimet (mm) — "
+                f"TOÀN BỘ khối lượng ống/dây (đơn vị 'm') dưới đây có thể SAI LỆCH so với thực tế nếu "
+                f"khách thực sự vẽ bằng đơn vị khác mm. PHẢI xác nhận lại đơn vị vẽ thực tế với khách "
+                f"trước khi dùng bảng dự toán này để lập hồ sơ thầu."
+            )
 
         auditor = audit.Auditor(doc)
         auditor.run()
@@ -511,6 +533,23 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 xref_segments, xref_notes = future.result()
                 all_segments.extend(xref_segments)
                 load_notes.extend(xref_notes)
+
+        # Phát hiện hình học TRÙNG LẶP (overkill) trước khi cộng dồn chiều dài — nếu khách
+        # gửi file chưa qua `optimize_cad_drawing`, các đoạn ống bị trace/copy chồng đè sẽ
+        # bị CỘNG DỒN LÀM ĐÔI chiều dài mà không có dấu hiệu bất thường nào trong kết quả.
+        # Chỉ cảnh báo (không tự xóa) vì tool này không được phép âm thầm sửa hình học.
+        _OVERKILL_TOLERANCE = 1.0
+        seen_seg_keys = {}
+        duplicate_length_by_layer = {}
+        for seg in all_segments:
+            (sax, say, _), (sbx, sby, _) = seg["start"], seg["end"]
+            p1 = (round(sax / _OVERKILL_TOLERANCE), round(say / _OVERKILL_TOLERANCE))
+            p2 = (round(sbx / _OVERKILL_TOLERANCE), round(sby / _OVERKILL_TOLERANCE))
+            key = (seg["layer"], frozenset((p1, p2)))
+            if key in seen_seg_keys:
+                duplicate_length_by_layer[seg["layer"]] = duplicate_length_by_layer.get(seg["layer"], 0.0) + seg["length"]
+            else:
+                seen_seg_keys[key] = True
 
         layer_lengths = {}
         for seg in all_segments:
@@ -627,7 +666,20 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
         df = pd.DataFrame(rows)
         df.to_excel(out_safe_path, index=False)
 
-        summary = (
+        summary = ""
+        if insunits_warning:
+            summary += insunits_warning + "\n\n"
+        if duplicate_length_by_layer:
+            total_dup_m = sum(duplicate_length_by_layer.values()) / 1000.0
+            summary += (
+                f"[CẢNH BÁO NGHIÊM TRỌNG] Phát hiện hình học TRÙNG LẶP (overkill) ước tính "
+                f"~{total_dup_m:.1f} m bị cộng dồn thừa vào khối lượng, tại các Layer: "
+                + ", ".join(sorted(duplicate_length_by_layer.keys())) + ". "
+                f"Nên chạy `optimize_cad_drawing` để dọn trùng lặp rồi bóc lại khối lượng trước "
+                f"khi dùng bảng dự toán này.\n\n"
+            )
+
+        summary += (
             f"BÓC TÁCH KHỐI LƯỢNG TỰ ĐỘNG THÀNH CÔNG (offline, không cần LLM tính toán).\n"
             f"- Đã làm sạch bản vẽ (Audit sửa {audit_fixes} lỗi).\n"
             f"- Tổng {len(block_counts)} loại Block (thiết bị) và {len([l for l, v in layer_lengths.items() if v > 0])} tuyến ống/dây có khối lượng.\n"
