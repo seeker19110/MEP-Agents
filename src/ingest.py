@@ -13,7 +13,11 @@ from src.config import settings
 def load_standard_docs():
     root = Path("data/standards")
     if not root.is_dir():
-        raise FileNotFoundError(f"Không thấy thư mục {root}")
+        # Lần chạy đầu tiên chưa có thư mục là chuyện bình thường: tạo sẵn và báo cho
+        # người dùng bỏ tài liệu vào, thay vì ném lỗi giữa chừng.
+        root.mkdir(parents=True, exist_ok=True)
+        print(f"Đã tạo thư mục {root} — hãy chép tài liệu tiêu chuẩn (.txt) vào rồi chạy lại.")
+        return []
     loader = DirectoryLoader(str(root), glob="**/*.txt", loader_cls=TextLoader, loader_kwargs={"encoding": "utf-8"})
     docs = loader.load()
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
@@ -22,6 +26,9 @@ def load_standard_docs():
 
 def main():
     docs = load_standard_docs()
+    if not docs:
+        print("Không có tài liệu nào trong data/standards — bỏ qua bước nạp vector.")
+        return
     print(f"Loaded {len(docs)} chunks from data/standards")
     api_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY")
     if not api_key or api_key == "dummy_key_to_prevent_crash_on_import":

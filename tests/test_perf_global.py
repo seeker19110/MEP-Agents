@@ -1,6 +1,7 @@
 """Global perf helpers."""
 from __future__ import annotations
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 
@@ -32,3 +33,34 @@ def test_unit_price_mem_cache():
     from src.unit_price_cache import mem_get, mem_set
     mem_set("k", {"a": 1})
     assert mem_get("k") == {"a": 1}
+
+
+def test_xref_resolution_survives_readfile_being_patched_to_the_cache(tmp_path):
+    """Regression: `cad_loader_perf_patch` gán tạm `ezdxf.readfile = readfile_cached` khi
+    đọc xref. Nếu cache lại gọi ngược qua `ezdxf.readfile` thì mỗi lần miss là đệ quy vô
+    hạn — xref bị bỏ khỏi khối lượng mà chỉ để lại một dòng note khó hiểu."""
+    import ezdxf
+    import src.cad_loader_perf_patch  # noqa: F401 - áp patch
+    from src import cad_cache, cad_loader
+
+    cad_cache.invalidate()
+    xref_file = tmp_path / "phu.dxf"
+    xdoc = ezdxf.new()
+    xdoc.modelspace().add_line((0, 0), (100, 0), dxfattribs={"layer": "PIPE"})
+    xdoc.saveas(str(xref_file))
+
+    doc = ezdxf.new()
+    doc.blocks.new("REF1", dxfattribs={"flags": 4, "xref_path": "phu.dxf"})
+    doc.modelspace().add_blockref("REF1", (500, 500))
+
+    def collect(space):
+        return [
+            {"layer": e.dxf.layer, "start": (e.dxf.start.x, e.dxf.start.y, 0),
+             "end": (e.dxf.end.x, e.dxf.end.y, 0), "length": 100.0, "is_arc": False}
+            for e in space if e.dxftype() == "LINE"
+        ]
+
+    segments, notes = cad_loader.resolve_xref_segments(doc, str(tmp_path), collect)
+    assert len(segments) == 1, notes
+    assert segments[0]["start"] == pytest.approx((500, 500, 0))
+    assert ezdxf.readfile is not cad_cache.readfile_cached  # đã trả lại hàm gốc

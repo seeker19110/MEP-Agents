@@ -137,8 +137,10 @@ def decode_access_token(token: str) -> dict[str, Any]:
 def verify_bootstrap_user(username: str, password: str) -> bool:
     """Dev bootstrap: single user from settings/env. Not a full user DB."""
     s = _settings()
-    u = (getattr(s, "jwt_bootstrap_user", None) or os.environ.get("JWT_BOOTSTRAP_USER", "admin") or "admin").strip()
-    p = (getattr(s, "jwt_bootstrap_password", None) or os.environ.get("JWT_BOOTSTRAP_PASSWORD", "") or "").strip()
+    # Biến môi trường đặt lúc chạy phải thắng giá trị nạp sẵn trong settings (từ .env
+    # hoặc mặc định "admin"), nếu không thì đổi user bootstrap qua env sẽ im lặng vô tác dụng.
+    u = (os.environ.get("JWT_BOOTSTRAP_USER", "") or getattr(s, "jwt_bootstrap_user", None) or "admin").strip()
+    p = (os.environ.get("JWT_BOOTSTRAP_PASSWORD", "") or getattr(s, "jwt_bootstrap_password", None) or "").strip()
     if not p:
         return False
     return hmac.compare_digest(username, u) and hmac.compare_digest(password, p)
