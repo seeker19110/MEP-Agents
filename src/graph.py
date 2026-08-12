@@ -20,6 +20,7 @@ from src.agents import (
 )
 import src.agents_phase_a_patch  # noqa: F401
 import src.agents_phase_b_patch  # noqa: F401
+import src.vector_search_bind  # noqa: F401
 from src import agents as _agents_mod
 supervisor_node = _agents_mod.supervisor_node
 
