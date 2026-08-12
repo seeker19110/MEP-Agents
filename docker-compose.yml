@@ -1,15 +1,5 @@
-# Đóng gói đủ 4 thành phần của hệ thống (xem TECH_DEBT.md mục 3) — trước đây repo chỉ có
-# 1 Dockerfile đóng gói riêng Streamlit app (`app.py`), không có FastAPI/Celery/Redis/Web
-# React nào được container hóa, nên "đã có Docker" là hiểu nhầm.
-#
-# LƯU Ý TRUNG THỰC: file này được viết và kiểm tra cú pháp bằng `docker compose config`,
-# nhưng CHƯA từng chạy thật bằng `docker compose up` trong môi trường phát triển hiện tại
-# (không có Docker daemon khả dụng ở đây) — trước khi coi mục 3 trong TECH_DEBT.md là "đã
-# xong", cần người có Docker daemon thật chạy thử `docker compose up --build` và xác nhận
-# cả 4 service lên đúng + Web App gọi được BOQ thật qua Worker.
-#
-# Sử dụng: `cp .env.example .env` (điền API key LLM thật), `cp web/.env.example web/.env`
-# (đặt VITE_API_BASE=http://localhost:8083 nếu chạy local), rồi `docker compose up --build`.
+# MEP-Agents stack: redis, postgres(pgvector), api, worker, streamlit, web
+# Phase C adds postgres service. Usage: cp .env.example .env && docker compose up --build
 
 services:
   redis:
@@ -23,8 +13,23 @@ services:
       timeout: 3s
       retries: 5
 
-  # FastAPI Cloud API (src/api.py) — nhận upload từ Web App + plugin Revit/AutoCAD, đẩy
-  # việc nặng (bóc khối lượng CAD) vào hàng đợi Celery thay vì xử lý đồng bộ trong request.
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mep}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mep_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-mep_agents}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mep} -d ${POSTGRES_DB:-mep_agents}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     build: .
     restart: unless-stopped
@@ -34,15 +39,16 @@ services:
     env_file:
       - .env
     environment:
-      # "redis" ở đây là TÊN SERVICE bên dưới (Docker Compose tự phân giải DNS nội bộ),
-      # không phải "localhost" như khi chạy trực tiếp trên máy dev (xem src/celery_app.py).
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       REDIS_HOST: redis
-      # Đổi domain Web App thật khi deploy — không dùng "*" (xem TECH_DEBT.md mục 7).
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mep:mep_secret@postgres:5432/mep_agents}
+      USE_PGVECTOR: ${USE_PGVECTOR:-false}
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     volumes:
       - uploads_data:/app/uploads
@@ -54,7 +60,6 @@ services:
       retries: 5
       start_period: 20s
 
-  # Worker Celery — xử lý bóc khối lượng CAD nặng ngoài tiến trình FastAPI (src/celery_app.py).
   worker:
     build: .
     restart: unless-stopped
@@ -65,15 +70,16 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       REDIS_HOST: redis
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mep:mep_secret@postgres:5432/mep_agents}
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     volumes:
       - uploads_data:/app/uploads
       - boq_data:/app/data/boq
 
-  # Streamlit UI (app.py) — giao diện chat multi-agent gốc của dự án, độc lập với luồng
-  # Web App React + FastAPI (2 giao diện khác nhau cho cùng backend Python).
   streamlit:
     build: .
     restart: unless-stopped
@@ -85,13 +91,11 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       REDIS_HOST: redis
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mep:mep_secret@postgres:5432/mep_agents}
     depends_on:
       redis:
         condition: service_healthy
 
-  # Web App React/Vite (web/) — build tĩnh, phục vụ qua Nginx. Biến VITE_* được nạp lúc
-  # BUILD (Vite bake vào bundle JS), không đổi được lúc chạy container — đổi thì phải build
-  # lại image (xem web/Dockerfile).
   web:
     build:
       context: ./web
@@ -105,5 +109,6 @@ services:
 
 volumes:
   redis_data:
+  postgres_data:
   uploads_data:
   boq_data:

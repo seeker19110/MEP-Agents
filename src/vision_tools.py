@@ -1,63 +1,69 @@
+"""Vision tools — YOLO CAD symbol detection (Phase C: custom MEPF weights)."""
+from __future__ import annotations
+
 import logging
 import os
+
 from langchain_core.tools import tool
-from src.workspace import resolve_safe_path
 
 logger = logging.getLogger(__name__)
 
-# YOLO Model Cache
 _YOLO_MODEL = None
+_YOLO_WEIGHTS_LOADED = None
+
 
 def get_yolo_model():
-    global _YOLO_MODEL
-    if _YOLO_MODEL is None:
-        try:
-            from ultralytics import YOLO
-            # Initialize a default YOLO11n model (nano) for performance
-            _YOLO_MODEL = YOLO('yolo11n.pt')
-        except ImportError:
-            logger.error("Ultralytics YOLO is not installed.")
-            return None
+    global _YOLO_MODEL, _YOLO_WEIGHTS_LOADED
+    try:
+        from src.yolo_mepf import resolve_weights_path
+        from src.config import settings
+        weights = resolve_weights_path(getattr(settings, "yolo_weights", "") or "")
+    except Exception:
+        weights = os.environ.get("YOLO_WEIGHTS", "").strip() or "yolo11n.pt"
+
+    if _YOLO_MODEL is not None and _YOLO_WEIGHTS_LOADED == weights:
+        return _YOLO_MODEL
+    try:
+        from ultralytics import YOLO
+        _YOLO_MODEL = YOLO(weights)
+        _YOLO_WEIGHTS_LOADED = weights
+        logger.info("YOLO loaded: %s", weights)
+    except Exception as e:
+        logger.error("Cannot load YOLO (%s)", e)
+        _YOLO_MODEL = None
+        _YOLO_WEIGHTS_LOADED = None
     return _YOLO_MODEL
+
 
 @tool
 def detect_cad_symbols_yolo(image_path: str) -> str:
-    """[DỰ PHÒNG] Dùng Computer Vision (YOLO) để phát hiện đối tượng trên ẢNH bản vẽ (xuất
-    bằng `render_cad_image`) khi `auto_quantity_takeoff`/`optimize_cad_drawing` không bóc
-    được khối lượng đúng do bản vẽ "rác" (Block bị nổ, vẽ bằng Line rời rạc thay vì
-    Block/Polyline nguyên vẹn — xem hàm hình học không đọc được các trường hợp này).
-
-    LƯU Ý QUAN TRỌNG VỀ ĐỘ CHÍNH XÁC: model mặc định (`yolo11n.pt`) là model PRETRAINED
-    trên bộ dữ liệu COCO (người/xe/đồ vật đời thường), CHƯA được huấn luyện riêng để nhận
-    diện ký hiệu/thiết bị MEPF (van, đầu phun, tủ điện...). Vì vậy công cụ này hiện chỉ có
-    giá trị tham khảo bổ sung (gợi ý còn vật gì trong ảnh, không rõ tên thiết bị MEPF thật),
-    KHÔNG thay thế được kết quả bóc khối lượng bằng hình học. Muốn dùng làm nguồn chính cho
-    BOQ, cần huấn luyện lại model bằng bộ ảnh ký hiệu MEPF đã gán nhãn (chưa có trong repo).
-
-    Args:
-        image_path: Đường dẫn tới file ảnh của bản vẽ (PNG/JPG do `render_cad_image` tạo ra).
-    """
+    """[DỰ PHÒNG] YOLO trên ảnh bản vẽ. Đặt YOLO_WEIGHTS=best.pt sau fine-tune MEPF."""
     model = get_yolo_model()
     if model is None:
         return "YOLO model not available. Please install ultralytics."
-        
-    safe_path = resolve_safe_path(image_path)
-    if not os.path.exists(safe_path):
-        return f"File ảnh không tồn tại: {safe_path}"
-        
+    if not os.path.exists(image_path):
+        return f"Không tìm thấy ảnh: {image_path}"
     try:
-        results = model.predict(source=safe_path, save=False)
-        detected_items = []
-        for r in results:
-            for box in r.boxes:
-                class_id = int(box.cls[0])
-                class_name = model.names[class_id]
-                confidence = float(box.conf[0])
-                detected_items.append(f"{class_name} ({confidence:.2f})")
-                
-        if not detected_items:
-            return "Không tìm thấy thiết bị nào qua ảnh."
-            
-        return "AI Computer Vision phát hiện:\n" + "\n".join(detected_items)
-    except Exception as e:
-        return f"Lỗi AI Vision: {e}"
+        from src.config import settings
+        conf = float(getattr(settings, "yolo_confidence", 0.25) or 0.25)
+    except Exception:
+        conf = 0.25
+    results = model.predict(image_path, conf=conf, verbose=False)
+    lines = [f"YOLO weights={_YOLO_WEIGHTS_LOADED} conf>={conf}"]
+    total = 0
+    for r in results:
+        names = r.names or {}
+        if r.boxes is None:
+            continue
+        for box in r.boxes:
+            cls_id = int(box.cls[0]) if box.cls is not None else -1
+            score = float(box.conf[0]) if box.conf is not None else 0.0
+            label = names.get(cls_id, str(cls_id))
+            xyxy = box.xyxy[0].tolist() if box.xyxy is not None else []
+            lines.append(f"- {label}: {score:.2f} bbox={[round(x, 1) for x in xyxy]}")
+            total += 1
+    if total == 0:
+        lines.append("Không phát hiện đối tượng nào trên ngưỡng confidence.")
+    else:
+        lines.insert(1, f"Tổng: {total} detection(s)")
+    return "\n".join(lines)
