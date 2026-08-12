@@ -200,3 +200,36 @@ def test_unit_guess_from_extent_prefers_a_plausible_building_size():
     assert cad_units.guess_unit_from_extent(50_000).mm_per_unit == 1.0     # 50 m nếu là mm
     assert cad_units.guess_unit_from_extent(45).mm_per_unit == 1000.0      # 45 m nếu là m
     assert cad_units.guess_unit_from_extent(1e-6) is None                  # không đủ căn cứ
+
+
+def test_drawings_this_project_writes_declare_millimeters(workspace):
+    """Vòng lặp khép kín: file do chính dự án ghi ra phải đọc lại đúng.
+
+    `ezdxf.new()` mặc định khai MÉT trong khi mọi tool ở đây vẽ theo mm. Từ khi khối lượng
+    được quy đổi THẬT theo header, một bản vẽ do `write_cad` tạo rồi đưa lại vào
+    `auto_quantity_takeoff` sẽ ra khối lượng sai 1000 lần nếu header khai sai.
+    """
+    from src.tools import write_cad
+
+    write_cad.invoke({"file_path": "ban_ve_moi.dxf", "layers": "ONG_CAP_NUOC, M-SAD"})
+
+    path = resolve_safe_path("ban_ve_moi.dxf")
+    doc = ezdxf.readfile(path)
+    assert doc.header["$INSUNITS"] == 4
+
+    # Vẽ tiếp một tuyến 6000 mm vào chính file đó rồi bóc lại: phải ra đúng 6 m.
+    doc.modelspace().add_line((0, 0), (6000, 0), dxfattribs={"layer": "ONG_CAP_NUOC"})
+    doc.saveas(path)
+    _, df = _takeoff(file_path="ban_ve_moi.dxf")
+    assert df[df["Hạng mục"] == "ONG_CAP_NUOC"].iloc[0]["Khối lượng"] == pytest.approx(6.0)
+
+
+def test_block_library_declares_millimeters():
+    """Thư viện block vẽ miệng gió 600x600 mm — header phải nói đúng là mm, nếu không
+    chính nó đang tự mô tả 'miệng gió 600x600 MÉT'."""
+    import os
+
+    from src.workspace import get_project_root
+
+    library = os.path.join(get_project_root(), "data", "blocks", "mepf_library.dxf")
+    assert ezdxf.readfile(library).header["$INSUNITS"] == 4

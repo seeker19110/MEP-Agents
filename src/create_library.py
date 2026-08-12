@@ -27,7 +27,9 @@ def main():
     if not os.path.exists(blocks_dir):
         os.makedirs(blocks_dir)
 
-    doc = ezdxf.new('R2010')
+    # units=4: các block dưới đây vẽ theo MILIMET (miệng gió 600x600 mm). `ezdxf.new()`
+    # mặc định khai MÉT nên thư viện từng tự mô tả mình là 'miệng gió 600x600 MÉT'.
+    doc = ezdxf.new('R2010', units=4)
     
     # 1. HVAC - DIFFUSER_SUPPLY (600x600 square with X)
     blk_ds = doc.blocks.new(name='DIFFUSER_SUPPLY')

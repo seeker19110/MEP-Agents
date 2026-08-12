@@ -167,7 +167,8 @@ def generate_panel_schedule(circuits_json: str, panel_name: str = "Tủ điện 
 
 def _draw_single_line(path: str, panel_name: str, rows, main_breaker: int, main_cable: float) -> None:
     """Vẽ sơ đồ nguyên lý một sợi: thanh cái ngang, aptomat tổng, các lộ ra rẽ xuống."""
-    doc = ezdxf.new()
+    # units=4: sơ đồ vẽ theo mm; `ezdxf.new()` mặc định khai MÉT nên phải khai lại.
+    doc = ezdxf.new(units=4)
     msp = doc.modelspace()
     for layer, color in (("SLD_BUS", 1), ("SLD_DEVICE", 3), ("SLD_TEXT", 7)):
         if layer not in doc.layers:

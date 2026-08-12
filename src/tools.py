@@ -415,7 +415,10 @@ def write_cad(file_path: str, layers: str) -> str:
     logger.info("Writing CAD: %s", file_path)
     try:
         safe_path = resolve_safe_path(file_path)
-        doc = ezdxf.new('R2010')
+        # units=4: khai rõ bản vẽ theo MILIMET — `ezdxf.new()` mặc định khai MÉT
+        # ($INSUNITS=6) trong khi toàn bộ dự án vẽ theo mm. Khai sai đơn vị thì chính
+        # file này khi được `auto_quantity_takeoff` đọc lại sẽ ra khối lượng sai 1000 lần.
+        doc = ezdxf.new('R2010', units=4)
         layer_list = [name.strip() for name in layers.split(',') if name.strip()]
         for layer in layer_list:
             doc.layers.add(name=layer)
@@ -1430,7 +1433,8 @@ def extract_new_blocks_to_library(file_path: str) -> str:
         
         library_path = os.path.join(get_project_root(), "data", "blocks", "mepf_library.dxf")
         if not os.path.exists(library_path):
-            lib_doc = ezdxf.new()
+            # units=4: thư viện block vẽ theo mm, phải khai đúng (xem ghi chú ở write_cad).
+            lib_doc = ezdxf.new(units=4)
             os.makedirs(os.path.dirname(library_path), exist_ok=True)
             lib_doc.saveas(library_path)
         else:
