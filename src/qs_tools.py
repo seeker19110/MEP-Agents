@@ -48,7 +48,12 @@ def load_unit_prices(csv_path: str = None) -> pl.DataFrame:
     try:
         import redis
         import pickle
-        r = redis.Redis(host='localhost', port=6379, db=0, socket_connect_timeout=1)
+        # Đọc qua biến môi trường thay vì hardcode "localhost" — cùng lý do đã sửa ở
+        # src/celery_app.py: trong Docker Compose, "localhost" là container riêng của
+        # chính process này, không phải service Redis (xem docker-compose.yml).
+        redis_host = os.environ.get("REDIS_HOST", "localhost")
+        redis_port = int(os.environ.get("REDIS_PORT", "6379"))
+        r = redis.Redis(host=redis_host, port=redis_port, db=0, socket_connect_timeout=1)
         cache_key = f"mep_unit_prices_{csv_path or 'default'}"
         cached_data = r.get(cache_key)
         if cached_data:

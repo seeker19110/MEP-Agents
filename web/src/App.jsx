@@ -3,8 +3,18 @@ import { UploadCloud, File, CheckCircle, Activity, Box, DownloadCloud } from 'lu
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8083/api/v1';
-const WS_URL = 'ws://localhost:8083/ws';
+// Trước đây hardcode thẳng localhost:8083 — build production trỏ server khác phải sửa
+// code rồi build lại (cùng vấn đề đã sửa ở plugin Revit/AutoCAD, xem TECH_DEBT.md mục 8).
+// Nay đọc qua biến môi trường Vite (`.env`/`.env.production`, tiền tố bắt buộc `VITE_`),
+// không đặt thì rơi về localhost mặc định cho dev.
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8083';
+const API_URL = `${API_BASE}/api/v1`;
+const WS_BASE = import.meta.env.VITE_WS_BASE || API_BASE.replace(/^http/, 'ws');
+const WS_URL = `${WS_BASE}/ws`;
+// Chỉ cần đặt khi server bật MEP_AGENTS_API_KEY (xem TECH_DEBT.md mục 7) — để trống thì
+// server vẫn mở như trước (mặc định dev cục bộ).
+const API_KEY = import.meta.env.VITE_API_KEY || '';
+const authHeaders = API_KEY ? { 'X-API-Key': API_KEY } : {};
 
 function App() {
   const [file, setFile] = useState(null);
@@ -32,7 +42,8 @@ function App() {
     try {
       const response = await axios.post(`${API_URL}/takeoff`, formData, {
         headers: {
-          'Content-Type': 'multipart/form-data'
+          'Content-Type': 'multipart/form-data',
+          ...authHeaders,
         }
       });
       setTaskId(response.data.task_id);
@@ -49,7 +60,8 @@ function App() {
   useEffect(() => {
     if (!taskId || taskStatus === 'success') return undefined;
 
-    const ws = new WebSocket(`${WS_URL}/task/${taskId}`);
+    const wsQuery = API_KEY ? `?api_key=${encodeURIComponent(API_KEY)}` : '';
+    const ws = new WebSocket(`${WS_URL}/task/${taskId}${wsQuery}`);
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -82,7 +94,8 @@ function App() {
 
   const handleDownload = () => {
     if (taskId) {
-      window.location.href = `${API_URL}/download/${taskId}`;
+      const query = API_KEY ? `?api_key=${encodeURIComponent(API_KEY)}` : '';
+      window.location.href = `${API_URL}/download/${taskId}${query}`;
     }
   };
 

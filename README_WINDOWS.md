@@ -80,3 +80,38 @@ qua biến môi trường (System Properties → Environment Variables), không 
 Với plugin Revit, thay vì biến môi trường có thể sửa trực tiếp
 `revit/MEPAgents.extension/MEPAgents.tab/AI Tools.panel/Auto BOQ.pushbutton/config.sample.json`
 (đổi tên thành `config.json` trong cùng thư mục) để đặt `api_base` riêng cho máy đó.
+
+## 6. Bảo mật API tối thiểu (tùy chọn — xem `TECH_DEBT.md` mục 7)
+
+Mặc định server KHÔNG yêu cầu xác thực (phù hợp máy dev cục bộ). Nếu server chạy trên máy
+khác trong mạng LAN hoặc public ra Internet, nên bật API key tối thiểu:
+
+- **`MEP_AGENTS_API_KEY`** (đặt ở Terminal 3, nơi chạy `uvicorn`) — khi đặt, mọi request
+  tới API phải kèm header `X-API-Key` khớp giá trị này (hoặc `?api_key=` trên query string
+  cho link tải file/WebSocket). Đặt CÙNG giá trị này ở:
+  - Plugin Revit: biến môi trường `MEP_AGENTS_API_KEY`, hoặc thêm `"api_key": "..."` vào `config.json`.
+  - Plugin AutoCAD: biến môi trường `MEP_AGENTS_API_KEY`.
+  - Web App: `web/.env` → `VITE_API_KEY=...` (đổi giá trị rồi phải `npm run build` lại nếu build production).
+- **`CORS_ALLOWED_ORIGINS`** (đặt ở Terminal 3) — danh sách domain Web App được phép gọi
+  API, phân tách bằng dấu phẩy. Không đặt thì mặc định chỉ cho phép
+  `http://localhost:5173` (dev cục bộ). Đặt domain thật khi deploy, KHÔNG dùng `*`.
+
+Lưu ý: đây chỉ là 1 khóa CHUNG chặn truy cập nặc danh, không phải xác thực người dùng thật
+(JWT/OAuth đa người dùng) — xem `TECH_DEBT.md` mục 6.
+
+## 7. Chạy bằng Docker Compose (thay thế bước 3, chưa kiểm chứng chạy thật)
+
+Thay vì mở 4 Terminal riêng, có thể dùng `docker-compose.yml` ở gốc dự án để chạy cả 5
+service (Redis, FastAPI, Celery worker, Streamlit, Web App) trong container:
+
+```powershell
+copy .env.example .env
+copy web\.env.example web\.env
+docker compose up --build
+```
+
+**CẢNH BÁO TRUNG THỰC:** file `docker-compose.yml` mới được viết và kiểm tra cú pháp bằng
+`docker compose config`, CHƯA từng chạy thật `docker compose up` (môi trường viết code
+không có Docker daemon). Có khả năng phát sinh lỗi khi chạy thật lần đầu (permission
+volume, thiếu biến môi trường...) — nếu gặp lỗi, ưu tiên báo lại để cập nhật thay vì tự
+suy luận sửa sai hướng.

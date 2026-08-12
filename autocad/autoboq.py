@@ -11,6 +11,9 @@ import win32com.client
 API_BASE = os.environ.get("MEP_AGENTS_API_BASE", "http://localhost:8083").rstrip("/")
 API_URL = f"{API_BASE}/api/v1/autocad/analyze"
 REQUEST_TIMEOUT_SEC = 30
+# Chỉ cần đặt khi server bật MEP_AGENTS_API_KEY (xem TECH_DEBT.md mục 7) — máy dev cục bộ
+# mặc định không cấu hình gì thì server vẫn mở, để trống biến này cũng được.
+API_KEY = os.environ.get("MEP_AGENTS_API_KEY", "")
 
 
 def get_acad_document_path():
@@ -42,12 +45,22 @@ def main():
 
     payload = json.dumps(payload_dict).encode("utf-8")
 
-    req = urllib.request.Request(API_URL, data=payload, headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+
+    req = urllib.request.Request(API_URL, data=payload, headers=headers)
     try:
         response = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC)
         result = json.loads(response.read().decode("utf-8"))
         print("\n=== KẾT QUẢ TỪ SWARM AI ===")
         print(result.get("message", ""))
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            print("\nServer yêu cầu API Key (401 Unauthorized) nhưng chưa có key đúng.")
+            print("Đặt biến môi trường MEP_AGENTS_API_KEY khớp với server.")
+        else:
+            print(f"\nServer trả lỗi HTTP {e.code}: {e}")
     except urllib.error.URLError as e:
         print(f"\nKhông kết nối được tới MEP-Agents Cloud tại {API_BASE}.")
         print("Kiểm tra server đã chạy chưa, hoặc đặt biến môi trường MEP_AGENTS_API_BASE")
