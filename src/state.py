@@ -32,6 +32,11 @@ def append_or_reset(old: Sequence[str], new: Sequence[str]) -> Sequence[str]:
     return list(old) + list(new)
 
 
+def replace_queue(old: Sequence[str], new: Sequence[str]) -> Sequence[str]:
+    """Last-write-wins queue (Phase B multi-intent drain)."""
+    return list(new)
+
+
 class AgentState(TypedDict):
     """The routing state of the multi-agent system."""
     # Messages in the conversation
@@ -61,3 +66,11 @@ class AgentState(TypedDict):
     # in order. Lets the Supervisor act like a real PM (e.g. run 'electrical'
     # then 'qs') instead of re-routing from the last message alone.
     completed_agents: Annotated[Sequence[str], append_or_reset]
+
+    # --- Phase B: Human-in-the-loop ---
+    # When True, supervisor should FINISH and wait for human approval text.
+    awaiting_human: bool
+    hil_reason: str
+
+    # --- Phase B: multi-intent agent queue (ordered remaining workers) ---
+    agent_queue: Annotated[Sequence[str], replace_queue]
