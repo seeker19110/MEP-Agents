@@ -21,6 +21,9 @@ from src.agents import (
 # Bind Phase A skills into agents.build_tools_for_llm / DELIVERABLE_TOOLS
 import src.agents_phase_a_patch  # noqa: F401
 import src.agents_phase_b_patch  # noqa: F401
+# Re-bind after Phase B wraps supervisor_node (import name is bound early)
+from src import agents as _agents_mod
+supervisor_node = _agents_mod.supervisor_node
 
 # Tool mới đăng ký ngoài `src/tools.py` để tránh đụng file registry quá lớn khi mở rộng
 # từng skill CAD; ToolNode phải thấy đủ tool để thực thi mọi tool_call từ agent.
