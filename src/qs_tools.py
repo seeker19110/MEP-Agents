@@ -423,6 +423,7 @@ import pandas as pd
 from ezdxf import audit
 from src import cad_loader, cad_geometry
 from src.tools import normalize_mepf_parameter_spec
+from src.bim_tools import classify_layer_system
 
 @tool
 def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_toan.xlsx",
@@ -440,7 +441,9 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
        qua `optimize_cad_drawing`, các đoạn ống bị trace/copy chồng đè sẽ bị cộng dồn thừa;
        tool cảnh báo tổng chiều dài nghi trùng lặp theo layer thay vì âm thầm tính sai.
     4. Đếm số lượng từng loại Block (thiết bị) theo tên + thuộc tính (attributes), cảnh báo
-       riêng các Block bị insert lệch tỷ lệ (scale khác 1) vì kích thước thực tế sẽ khác chuẩn.
+       riêng các Block bị insert lệch tỷ lệ (scale khác 1) vì kích thước thực tế sẽ khác chuẩn,
+       và cảnh báo riêng các đối tượng thuộc Layer đang TẮT/ĐÓNG BĂNG (vẫn được tính vào khối
+       lượng vì không tự đoán ý khách, nhưng nêu rõ để khách xác nhận có nên loại hay không).
     5. Cộng dồn tổng chiều dài THẬT từng tuyến ống/dây theo Layer — tính đúng cung cong
        (bulge trong LWPOLYLINE, entity ARC/CIRCLE) thay vì chỉ đo dây cung, và cộng cả
        chênh lệch cao độ Z nếu tuyến đi xiên giữa các cao độ.
@@ -448,7 +451,11 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
        cần thiết vì ống vẽ bằng LINE/POLYLINE thuần (không chèn Block phụ kiện) trước đây
        bị bỏ sót hoàn toàn phần phụ kiện.
     7. Liên kết Ghi chú văn bản (TEXT/MTEXT, ví dụ 'Ống uPVC Ø110') với Layer ống gần nhất
-       (Spatial Matching) để đặt tên hạng mục đúng theo bản vẽ thay vì chỉ ghi tên Layer thô.
+       (Spatial Matching) để đặt tên hạng mục đúng theo bản vẽ thay vì chỉ ghi tên Layer thô —
+       nếu tuyến gần nhất và tuyến gần nhì thuộc HAI HỆ KHÁC NHAU (VD ống gió HVAC và máng cáp
+       Điện chạy song song sát nhau) với khoảng cách tương đương, ghi chú được coi là MƠ HỒ và
+       KHÔNG gán vào tuyến nào (liệt kê riêng để kỹ sư tự đối chiếu) thay vì đoán bừa theo hệ
+       gần nhất.
     8. Cộng % hao hụt vật tư (`wastage_percent`, mặc định 5%) vào khối lượng ống/dây — số đo
        hình học thuần luôn thấp hơn khối lượng cần mua thực tế do cắt nối, bù trừ khi thi công.
     9. Ghi toàn bộ kết quả (STT, Hạng mục, Đơn vị, Khối lượng, Ghi chú) ra file Excel thật.
@@ -487,8 +494,26 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
         texts = []
         all_segments = []  # dùng cho cả tổng chiều dài, spatial-match và suy phụ kiện
 
+        # Layer bị TẮT (off) hoặc ĐÓNG BĂNG (frozen) thường là nội dung tham chiếu cũ/không
+        # còn hiệu lực trong bản vẽ hiện hành — vẫn đếm vào khối lượng (không tự loại vì có
+        # thể khách chỉ tạm tắt để dễ nhìn, không có nghĩa là bỏ) nhưng CẢNH BÁO riêng để QS
+        # tự xác nhận với khách, tránh lẫn nội dung không dùng vào dự toán.
+        _layer_visibility_cache = {}
+        off_frozen_layer_hits = {}
+
+        def _is_layer_off_or_frozen(layer_name: str) -> bool:
+            if layer_name not in _layer_visibility_cache:
+                layer_obj = doc.layers.get(layer_name) if layer_name in doc.layers else None
+                _layer_visibility_cache[layer_name] = bool(
+                    layer_obj and (layer_obj.is_off() or layer_obj.is_frozen())
+                )
+            return _layer_visibility_cache[layer_name]
+
         for entity in msp:
             dxftype = entity.dxftype()
+            entity_layer = entity.dxf.layer
+            if _is_layer_off_or_frozen(entity_layer):
+                off_frozen_layer_hits[entity_layer] = off_frozen_layer_hits.get(entity_layer, 0) + 1
 
             if dxftype == 'INSERT':
                 b_name = entity.dxf.name
@@ -557,7 +582,14 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
 
         # Liên kết ghi chú <-> layer ống gần nhất, để đặt tên hạng mục theo đúng ghi chú
         # trên bản vẽ (ví dụ 'Ống uPVC Ø110') thay vì chỉ hiển thị tên Layer kỹ thuật.
+        # Đề phòng GÁN NHẦM HỆ: hai tuyến khác hệ (VD ống gió HVAC và máng cáp Điện) chạy
+        # song song sát nhau có thể khiến layer gần nhất KHÔNG PHẢI hệ đúng của ghi chú —
+        # nếu tuyến gần nhì thuộc hệ KHÁC và khoảng cách gần tương đương, coi là mơ hồ và
+        # bỏ qua thay vì đoán bừa (liệt kê riêng để kỹ sư tự kiểm tra).
+        _AMBIGUITY_RATIO = 1.3
+        layer_systems = {layer: classify_layer_system(layer) for layer in {s["layer"] for s in all_segments}}
         layer_labels = {}  # layer -> {label: count of matching texts}
+        ambiguous_labels = []
         if texts and all_segments:
             try:
                 import numpy as np
@@ -566,37 +598,49 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                     [s["start"][0], s["start"][1], s["end"][0], s["end"][1]]
                     for s in all_segments
                 ], dtype=float)
-                
+                seg_systems = np.array([layer_systems[s["layer"]] for s in all_segments])
+
                 ax = seg_arr[:, 0]
                 ay = seg_arr[:, 1]
                 bx = seg_arr[:, 2]
                 by = seg_arr[:, 3]
-                
+
                 dx = bx - ax
                 dy = by - ay
                 l2 = dx**2 + dy**2
                 zero_l2 = (l2 == 0)
                 l2_safe = np.where(zero_l2, 1.0, l2)
-                
+
                 for t in texts:
                     tx, ty = t["pos"]
-                    
+
                     t_val = ((tx - ax) * dx + (ty - ay) * dy) / l2_safe
                     t_val = np.clip(t_val, 0.0, 1.0)
-                    
+
                     proj_x = ax + t_val * dx
                     proj_y = ay + t_val * dy
-                    
+
                     dist_sq = (tx - proj_x)**2 + (ty - proj_y)**2
                     dist_sq = np.where(zero_l2, (tx - ax)**2 + (ty - ay)**2, dist_sq)
-                    
+
                     min_idx = np.argmin(dist_sq)
                     min_dist = np.sqrt(dist_sq[min_idx])
-                    
-                    if min_dist <= max_distance:
-                        best_layer = all_segments[min_idx]["layer"]
-                        bucket = layer_labels.setdefault(best_layer, {})
-                        bucket[t["text"]] = bucket.get(t["text"], 0) + 1
+
+                    if min_dist > max_distance:
+                        continue
+
+                    nearest_system = seg_systems[min_idx]
+                    if nearest_system:
+                        diff_system_mask = seg_systems != nearest_system
+                        if diff_system_mask.any():
+                            alt_min_dist = math.sqrt(np.min(np.where(diff_system_mask, dist_sq, np.inf)))
+                            if alt_min_dist <= min_dist * _AMBIGUITY_RATIO:
+                                ambiguous_labels.append(t["text"])
+                                continue
+
+                    best_layer = all_segments[min_idx]["layer"]
+                    bucket = layer_labels.setdefault(best_layer, {})
+                    bucket[t["text"]] = bucket.get(t["text"], 0) + 1
             except ImportError:
                 # Fallback to python loop if numpy is not available
                 def _seg_dist(px, py, seg):
@@ -606,17 +650,28 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                         return math.hypot(px - sax, py - say)
                     st = max(0.0, min(1.0, ((px - sax) * (sbx - sax) + (py - say) * (sby - say)) / sl2))
                     return math.hypot(px - (sax + st * (sbx - sax)), py - (say + st * (sby - say)))
-                    
+
                 for t in texts:
                     tx, ty = t["pos"]
-                    min_dist, best_layer = float('inf'), None
+                    min_dist, best_layer, best_system = float('inf'), None, ""
+                    alt_min_dist = float('inf')
                     for seg in all_segments:
                         d = _seg_dist(tx, ty, seg)
                         if d < min_dist:
-                            min_dist, best_layer = d, seg["layer"]
-                    if best_layer is not None and min_dist <= max_distance:
-                        bucket = layer_labels.setdefault(best_layer, {})
-                        bucket[t["text"]] = bucket.get(t["text"], 0) + 1
+                            min_dist, best_layer, best_system = d, seg["layer"], layer_systems[seg["layer"]]
+                    if best_layer is None or min_dist > max_distance:
+                        continue
+                    if best_system:
+                        for seg in all_segments:
+                            if layer_systems[seg["layer"]] and layer_systems[seg["layer"]] != best_system:
+                                d = _seg_dist(tx, ty, seg)
+                                if d < alt_min_dist:
+                                    alt_min_dist = d
+                        if alt_min_dist <= min_dist * _AMBIGUITY_RATIO:
+                            ambiguous_labels.append(t["text"])
+                            continue
+                    bucket = layer_labels.setdefault(best_layer, {})
+                    bucket[t["text"]] = bucket.get(t["text"], 0) + 1
 
         fittings_by_layer = cad_geometry.detect_fittings(all_segments, stock_length=pipe_stock_length_mm)
 
@@ -669,6 +724,24 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
         summary = ""
         if insunits_warning:
             summary += insunits_warning + "\n\n"
+        if off_frozen_layer_hits:
+            summary += (
+                f"[CẢNH BÁO] {sum(off_frozen_layer_hits.values())} đối tượng thuộc "
+                f"{len(off_frozen_layer_hits)} Layer đang bị TẮT (off) hoặc ĐÓNG BĂNG (frozen) "
+                f"vẫn được TÍNH VÀO khối lượng bên dưới: "
+                + ", ".join(sorted(off_frozen_layer_hits.keys()))
+                + ". Layer tắt/đóng băng thường là nội dung tham chiếu cũ không còn hiệu lực — "
+                "xác nhận lại với khách có nên loại các Layer này khỏi dự toán hay không.\n\n"
+            )
+        if ambiguous_labels:
+            sample = ", ".join(f"'{x}'" for x in ambiguous_labels[:5])
+            summary += (
+                f"[CẢNH BÁO] {len(ambiguous_labels)} ghi chú kích thước KHÔNG được gán vào tuyến "
+                f"nào vì nằm gần ranh giới giữa 2 hệ khác nhau (VD: {sample}"
+                + (", ..." if len(ambiguous_labels) > 5 else "") +
+                f") — cần đối chiếu bản vẽ thủ công để tránh gán nhầm hệ, thay vì đoán bừa "
+                f"theo layer gần nhất.\n\n"
+            )
         if duplicate_length_by_layer:
             total_dup_m = sum(duplicate_length_by_layer.values()) / 1000.0
             summary += (
