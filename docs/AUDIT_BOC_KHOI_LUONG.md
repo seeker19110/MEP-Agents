@@ -1,6 +1,6 @@
 # Hồ sơ rà soát sai lệch: bản vẽ → bóc khối lượng
 
-Ghi lại kết quả đợt rà soát tại PR #22 (6 đợt, 19 nguồn) và bộ test bất biến bổ sung sau đó (thêm 3 nguồn). Mục đích của file này
+Ghi lại kết quả đợt rà soát tại PR #22 (6 đợt, 19 nguồn), bộ test bất biến (thêm 3 nguồn) và đợt đo coverage (thêm 2 nguồn). Mục đích của file này
 là để **lần rà sau không phải làm lại từ đầu**: biết chỗ nào đã rà sạch, chỗ nào cố ý
 không sửa và vì sao, chỗ nào còn nợ.
 
@@ -18,7 +18,7 @@ Quy trình dùng cho đợt này: [`PROMPT_RA_SOAT_SAI_LECH.md`](PROMPT_RA_SOAT_
 4. **Bóc thiếu âm thầm nguy hiểm hơn bóc thừa có cảnh báo.** Khi phải chọn, giữ lại dòng
    và đánh dấu, chứ không tự loại.
 
-## 22 nguồn sai lệch đã xử lý
+## 24 nguồn sai lệch đã xử lý
 
 | # | Nguồn sai lệch | Hậu quả | Nơi sửa |
 |---|---|---|---|
@@ -44,10 +44,13 @@ Quy trình dùng cho đợt này: [`PROMPT_RA_SOAT_SAI_LECH.md`](PROMPT_RA_SOAT_
 | 20 | ELLIPSE nằm nghiêng đo ra 0 m | Thiếu trọn vẹn tuyến ellipse | `cad_geometry._curve_span` |
 | 21 | Ngưỡng lọc nét ký hiệu không áp cho block lồng | Thừa nét ký hiệu trong block lồng | `cad_geometry.explode_insert` |
 | 22 | SPLINE định nghĩa bằng fit points ra kích thước 0 | Thiếu (chỉ lộ khi refactor) | `cad_geometry._curve_span` |
+| 23 | Nhánh có/không có `numpy` cho kết quả KHÁC NHAU | Cùng bản vẽ, hai bảng khối lượng | `qs_tools` (mặt nạ hệ) |
+| 24 | Guard chống bung XREF chưa bao giờ kích hoạt | Nguy cơ tính đôi nội dung XREF | `cad_geometry.is_xref_block` |
 
 Test tương ứng: `tests/test_takeoff_units_and_blocks.py`,
 `test_takeoff_curve_and_block_naming.py`, `test_takeoff_system_and_double_line.py`,
-`test_takeoff_fittings_and_labels.py`, `test_takeoff_invariants.py`.
+`test_takeoff_fittings_and_labels.py`, `test_takeoff_invariants.py`,
+`test_takeoff_fallback_paths.py`.
 
 ## Đã rà, KHÔNG có lỗi — lần sau khỏi rà lại
 
@@ -71,6 +74,38 @@ bản vẽ gốc lẫn bản vẽ đã xoay, nên bất biến "xoay không đ�
 Bất biến kiểm tra tính NHẤT QUÁN, không kiểm tra tính ĐÚNG: một cài đặt sai đều nhau ở
 mọi phía vẫn thoả mãn mọi bất biến. Test theo ca neo kết quả vào một con số tính tay
 được. Bỏ loại nào cũng để lọt một lớp lỗi.
+
+## Kết quả đo coverage
+
+Đo bằng `coverage run --branch --source=src -m pytest`. Trước khi rà: `cad_geometry` 71%,
+`qs_tools` 82%. Sau khi rà và bổ sung test: `cad_geometry` 80%, `cad_loader` 89%,
+`cad_units` 91%, `qs_tools` 89% — tổng 85%.
+
+Coverage không phải mục tiêu tự thân; giá trị nằm ở chỗ nó chỉ ra **hai cài đặt cho cùng
+một việc mà chỉ một cái được kiểm chứng**:
+
+- **Nhánh thiếu `rtree`** (suy phụ kiện dùng vòng lặp O(N²) thay cho chỉ mục không gian):
+  đã đối chiếu 25 ca hình học ngẫu nhiên + 300 ca khi rà tay — **khớp hoàn toàn**.
+- **Nhánh thiếu `numpy`** (gán nhãn bằng vòng lặp Python): **LỆCH THẬT** — nguồn #23.
+  Nhánh `numpy` coi tuyến không tra được hệ là "hệ khác" nên bỏ ghi chú, nhánh dự phòng
+  thì không. Cùng một bản vẽ ra hai bảng khối lượng khác nhau tuỳ máy có cài `numpy`.
+  Đã sửa theo nhánh dự phòng vì đúng chủ ý đã ghi ("hai tuyến thuộc HAI HỆ KHÁC NHAU") —
+  và vì sau nguồn #8 ta biết bản vẽ thật đầy tuyến không tra được hệ, nên cách hiểu cũ
+  sẽ bỏ ghi chú tràn lan trên hồ sơ thật.
+
+Coverage cũng lộ ra nguồn #24: guard `getattr(block, "is_xref", False)` trong
+`explode_insert` **không bao giờ đúng** vì `BlockLayout` của ezdxf không có thuộc tính đó
+— một guard chỉ trông như đang bảo vệ. `cad_loader` làm đúng nhờ kiểm tra bit cờ; nay cả
+hai dùng chung `cad_geometry.is_xref_block`.
+
+### Phần còn trống và lý do không đuổi tiếp
+
+Các dòng chưa phủ còn lại trong `cad_geometry` (`_subdivide_bulge`, `entity_points_3d`,
+`build_topology_graph`, `detect_disconnected_pipes`) và `qs_tools`
+(`calc_support_hangers`) **không thuộc chuỗi bóc khối lượng** — chúng phục vụ clash
+detection và các tool QS đứng riêng. Chúng cần một đợt rà của riêng luồng đó, với cùng
+quy trình; đuổi coverage cho đủ số ở đây chỉ làm đẹp con số chứ không giảm rủi ro của
+luồng đang rà.
 
 ## Cân nhắc nhưng KHÔNG làm — kèm lý do
 
@@ -108,11 +143,13 @@ Rà lại bảng này mỗi khi đổi logic hình học. Cột cuối là đi�
    nhóm bất biến: đơn vị, phép dời hình, lồng/phẳng, cộng tính, lũy đẳng). Ngay lần chạy
    đầu đã bắt được **nguồn #20 và #21** — cả hai đều là lỗi "sai âm thầm" mà 6 đợt rà thủ
    công trước đó không thấy.
-2. **Đo coverage** phần `cad_geometry` / `qs_tools` để tìm nhánh chưa bao giờ chạy.
-3. **Chạy trên hồ sơ thật của khách** (đợt này mới chỉ chạy dữ liệu tổng hợp và file
+2. ~~**Đo coverage**~~ — ĐÃ LÀM. Kết quả và những gì nó phát hiện: xem mục dưới.
+3. **Rà luồng clash detection** (`bim_tools`, `analyze_cad_spatial_context`) bằng cùng
+   quy trình — đó là phần `cad_geometry` còn trống coverage.
+4. **Chạy trên hồ sơ thật của khách** (đợt này mới chỉ chạy dữ liệu tổng hợp và file
    thư viện block của chính dự án).
-4. **Mở rộng `BLOCK_STANDARD`**: nhiều tên block thông dụng chưa khớp (VD `DEN_LED_600`),
+5. **Mở rộng `BLOCK_STANDARD`**: nhiều tên block thông dụng chưa khớp (VD `DEN_LED_600`),
    nên bị đánh `CHƯA XÁC ĐỊNH HỆ` dù rõ ràng là thiết bị điện.
-5. **Category `Pipes` và `Mechanical Equipment` của Revit** hiện để `CHƯA XÁC ĐỊNH HỆ` —
+6. **Category `Pipes` và `Mechanical Equipment` của Revit** hiện để `CHƯA XÁC ĐỊNH HỆ` —
    đúng về mặt trung thực (Revit không phân biệt được), nhưng nếu payload có thêm trường
    hệ thống thì nên dùng.

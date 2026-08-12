@@ -22,6 +22,7 @@ import tempfile
 
 import ezdxf
 
+from src import cad_geometry
 from src.workspace import resolve_safe_path
 
 logger = logging.getLogger(__name__)
@@ -119,8 +120,7 @@ def list_xrefs(doc):
     """Danh sách XREF khai báo trong bản vẽ: [(tên khối, đường dẫn file)]."""
     xrefs = []
     for block in doc.blocks:
-        if getattr(block, "is_xref", False) or (getattr(block.block, "dxf", None) is not None
-                                                and getattr(block.block.dxf, "flags", 0) & 4):
+        if cad_geometry.is_xref_block(block):
             path = getattr(block.block.dxf, "xref_path", "") or ""
             if path:
                 xrefs.append((block.name, path))

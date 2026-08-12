@@ -499,6 +499,21 @@ def block_scale(entity):
     )
 
 
+def is_xref_block(block) -> bool:
+    """Block này có phải XREF (tham chiếu file ngoài) hay không.
+
+    `BlockLayout` của ezdxf KHÔNG có thuộc tính `is_xref`, nên kiểm tra bằng
+    `getattr(block, "is_xref", False)` sẽ luôn ra False — một guard chỉ trông như đang bảo
+    vệ. Cờ thật nằm ở bit 4 của `flags` trong bản ghi BLOCK.
+    """
+    if getattr(block, "is_xref", False):
+        return True
+    try:
+        return bool(getattr(block.block.dxf, "flags", 0) & 4)
+    except Exception:
+        return False
+
+
 def insert_repeat_count(entity) -> int:
     """Số bản sao THẬT mà một INSERT tạo ra trên bản vẽ (MINSERT = lưới hàng x cột).
 
@@ -692,7 +707,7 @@ def explode_insert(entity, doc, max_depth: int = 8, min_run_length: float = 0.0,
         block = doc.blocks.get(name)
     except Exception:
         block = None
-    if block is None or getattr(block, "is_xref", False):
+    if block is None or is_xref_block(block):
         return segments, nested_inserts
 
     base, xscale, yscale, rotation, length_factor = _insert_transform(entity)
