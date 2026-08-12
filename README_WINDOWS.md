@@ -64,3 +64,19 @@ Sau khi tất cả 4 Terminal đã chạy không báo lỗi:
 2. Vào tab Upload, kéo thả 1 file CAD bất kỳ.
 3. Nhìn sang **Terminal 2 (Celery)**: Bạn sẽ thấy log `Task src.celery_app.parse_cad_to_db_task... received` báo hiệu luồng bóc khối lượng AI đang xử lý ngầm.
 4. Mở AutoCAD, chạy lệnh LISP `AUTOBOQ`. AutoCAD sẽ gọi sang FastAPI (Terminal 3) và bạn sẽ thấy khối lượng được xuất thẳng ra file Excel trong thư mục `data/boq/`.
+
+## 5. Cấu hình Plugin AutoCAD / Revit (không còn hardcode)
+
+Cả hai plugin trước đây trỏ cứng tới `localhost:8083` (AutoCAD) và tới đường dẫn cá nhân
+`C:\Users\liend\MEP-Agents` (AutoCAD LISP), nên chỉ chạy đúng trên đúng 1 máy. Nay cấu hình
+qua biến môi trường (System Properties → Environment Variables), không cần sửa code:
+
+- **`MEP_AGENTS_HOME`** — đường dẫn thư mục gốc dự án, ví dụ
+  `C:\Users\<ten-ban>\MEP-Agents`. Dùng bởi `autocad/AUTOBOQ.lsp` để tìm `autoboq.py`.
+- **`MEP_AGENTS_API_BASE`** — địa chỉ server FastAPI, mặc định `http://localhost:8083`
+  nếu không đặt. Dùng bởi cả `autocad/autoboq.py` và plugin Revit. Đặt biến này nếu server
+  chạy trên máy khác/cloud (ví dụ `http://192.168.1.10:8083`).
+
+Với plugin Revit, thay vì biến môi trường có thể sửa trực tiếp
+`revit/MEPAgents.extension/MEPAgents.tab/AI Tools.panel/Auto BOQ.pushbutton/config.sample.json`
+(đổi tên thành `config.json` trong cùng thư mục) để đặt `api_base` riêng cho máy đó.
