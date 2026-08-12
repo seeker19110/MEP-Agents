@@ -439,7 +439,10 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
        báo cáo vì mọi chiều dài tính ra sau đó có thể sai lệch hàng chục-hàng nghìn lần.
     3. PHÁT HIỆN HÌNH HỌC TRÙNG LẶP (overkill) trước khi cộng chiều dài — nếu bản vẽ chưa
        qua `optimize_cad_drawing`, các đoạn ống bị trace/copy chồng đè sẽ bị cộng dồn thừa;
-       tool cảnh báo tổng chiều dài nghi trùng lặp theo layer thay vì âm thầm tính sai.
+       tool cảnh báo tổng chiều dài nghi trùng lặp theo layer thay vì âm thầm tính sai. Riêng
+       hình học TRÙNG VỊ TRÍ giữa nội dung XREF và hình học vẽ trực tiếp trong bản vẽ chính
+       (khác layer nên overkill theo layer không bắt được — thường do khách trace lại nội
+       dung xref khi gộp thủ công nhiều nguồn) được kiểm tra và cảnh báo RIÊNG.
     4. Đếm số lượng từng loại Block (thiết bị) theo tên + thuộc tính (attributes), cảnh báo
        riêng các Block bị insert lệch tỷ lệ (scale khác 1) vì kích thước thực tế sẽ khác chuẩn,
        và cảnh báo riêng các đối tượng thuộc Layer đang TẮT/ĐÓNG BĂNG (vẫn được tính vào khối
@@ -541,13 +544,16 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
 
             all_segments.extend(cad_geometry.collect_segments([entity]))
 
+        local_segment_count = len(all_segments)  # ranh giới: segment sau chỉ số này là từ XREF
+
         # XREF: gộp thêm tuyến nằm trong file tham chiếu ngoài, nếu có khai báo và tìm
         # được file đi kèm. Không tìm được thì nêu rõ tên trong load_notes thay vì âm thầm
         # bỏ qua — bỏ sót một xref có thể làm khối lượng thiếu cả một hệ thống.
         base_dir = os.path.dirname(resolve_safe_path(file_path))
         import concurrent.futures
-        
+
         xref_defs = {name: path for name, path in cad_loader.list_xrefs(doc)}
+        xref_segments = []
         if xref_defs:
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 # Chạy resolve_xref_segments trong luồng riêng để tăng tốc đọc file I/O
@@ -564,17 +570,39 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
         # bị CỘNG DỒN LÀM ĐÔI chiều dài mà không có dấu hiệu bất thường nào trong kết quả.
         # Chỉ cảnh báo (không tự xóa) vì tool này không được phép âm thầm sửa hình học.
         _OVERKILL_TOLERANCE = 1.0
-        seen_seg_keys = {}
-        duplicate_length_by_layer = {}
-        for seg in all_segments:
+
+        def _rounded_endpoints(seg):
             (sax, say, _), (sbx, sby, _) = seg["start"], seg["end"]
             p1 = (round(sax / _OVERKILL_TOLERANCE), round(say / _OVERKILL_TOLERANCE))
             p2 = (round(sbx / _OVERKILL_TOLERANCE), round(sby / _OVERKILL_TOLERANCE))
-            key = (seg["layer"], frozenset((p1, p2)))
+            return frozenset((p1, p2))
+
+        seen_seg_keys = {}
+        duplicate_length_by_layer = {}
+        for seg in all_segments:
+            key = (seg["layer"], _rounded_endpoints(seg))
             if key in seen_seg_keys:
                 duplicate_length_by_layer[seg["layer"]] = duplicate_length_by_layer.get(seg["layer"], 0.0) + seg["length"]
             else:
                 seen_seg_keys[key] = True
+
+        # Chồng lấn XREF <-> hình học vẽ LOCAL: khác với overkill cùng layer ở trên, đây là
+        # trường hợp khách vô tình VẼ LẠI (trace) nội dung xref vào bản vẽ chính (thường khi
+        # gộp thủ công nhiều nguồn) — layer có thể KHÁC tên nên overkill theo layer ở trên
+        # không bắt được. Chỉ so khớp LOCAL với XREF (không so cùng nhóm với nhau) để tránh
+        # báo nhầm hai hệ thống thật khác nhau tình cờ chạy trùng vị trí.
+        xref_overlap_length = 0.0
+        xref_overlap_layers = set()
+        if xref_segments:
+            local_points = {}
+            for seg in all_segments[:local_segment_count]:
+                local_points.setdefault(_rounded_endpoints(seg), []).append(seg)
+            for xseg in xref_segments:
+                matches = local_points.get(_rounded_endpoints(xseg))
+                if matches:
+                    xref_overlap_length += xseg["length"]
+                    xref_overlap_layers.add(xseg["layer"])
+                    xref_overlap_layers.update(m["layer"] for m in matches)
 
         layer_lengths = {}
         for seg in all_segments:
@@ -750,6 +778,16 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 + ", ".join(sorted(duplicate_length_by_layer.keys())) + ". "
                 f"Nên chạy `optimize_cad_drawing` để dọn trùng lặp rồi bóc lại khối lượng trước "
                 f"khi dùng bảng dự toán này.\n\n"
+            )
+        if xref_overlap_length > 0:
+            total_xref_dup_m = xref_overlap_length / 1000.0
+            summary += (
+                f"[CẢNH BÁO NGHIÊM TRỌNG] Phát hiện ~{total_xref_dup_m:.1f} m hình học TRÙNG VỊ TRÍ "
+                f"giữa nội dung XREF và hình học VẼ TRỰC TIẾP trong bản vẽ chính (khác layer nên "
+                f"KHÔNG bị bắt bởi cảnh báo overkill ở trên), tại các Layer liên quan: "
+                + ", ".join(sorted(xref_overlap_layers)) + ". "
+                f"Thường do khách VẼ LẠI (trace) nội dung xref vào bản vẽ chính khi gộp thủ công "
+                f"nhiều nguồn — kiểm tra kỹ trước khi dùng khối lượng này, có thể đang bị TÍNH ĐÔI.\n\n"
             )
 
         summary += (
