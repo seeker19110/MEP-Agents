@@ -153,3 +153,35 @@ def test_double_line_detection_reports_the_overlapping_length():
     ]
     result = cad_geometry.detect_double_line_runs(segments)
     assert result["M-SAD"] == pytest.approx(10000.0)
+
+
+def test_boq_chapters_follow_the_system_column_not_the_item_name(workspace):
+    """Ống gió trên layer chuẩn 'M-SAD' từng rơi vào chương 'HẠNG MỤC KHÁC' chỉ vì tên hạng
+    mục không chứa từ khóa 'ong gio' — hạng mục HVAC xếp nhầm chương ngay trong hồ sơ thầu.
+    Cột 'Hệ' lấy từ chính layer là căn cứ chắc chắn hơn, và phải đi hết chuỗi
+    takeoff -> calc_boq_cost -> export_boq_vietnam."""
+    from src.qs_tools import calc_boq_cost, export_boq_vietnam
+
+    doc = ezdxf.new(units=4)
+    msp = doc.modelspace()
+    for layer in ("ONG_CAP_NUOC", "M-SAD"):
+        doc.layers.add(layer)
+        msp.add_line((0, 0), (30000, 0), dxfattribs={"layer": layer})
+    doc.saveas(resolve_safe_path("bv.dxf"))
+
+    auto_quantity_takeoff.invoke({"file_path": "bv.dxf", "output_excel_path": "kl.xlsx"})
+    calc_boq_cost.invoke({"takeoff_excel_path": "kl.xlsx", "output_excel_path": "dt.xlsx"})
+    result = export_boq_vietnam.invoke({"boq_excel_path": "dt.xlsx",
+                                        "output_excel_path": "boq.xlsx"})
+
+    assert "A. HỆ THỐNG ĐIỀU HÒA KHÔNG KHÍ & THÔNG GIÓ (HVAC)" in result
+    assert "HẠNG MỤC KHÁC" not in result
+
+
+def test_boq_chapter_falls_back_to_name_without_a_system_column():
+    """File khối lượng cũ (chưa có cột 'Hệ') vẫn phải phân chương như trước."""
+    from src.qs_tools import classify_boq_group
+
+    assert classify_boq_group("Ống gió cấp", "")[0] == "A"
+    assert classify_boq_group("M-SAD", "HVAC")[0] == "A"
+    assert classify_boq_group("M-SAD", "")[0] == "E"

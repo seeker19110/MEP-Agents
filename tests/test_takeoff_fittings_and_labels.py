@@ -1,11 +1,13 @@
-"""Đợt rà soát thứ tư: suy phụ kiện sai số lượng, gộp thiết bị theo mã hiệu, và chữ MTEXT.
+"""Đợt rà soát thứ tư và thứ năm: phụ kiện, gộp thiết bị, nhãn tuyến.
 
 1. Co (elbow): mỗi mắt xấp xỉ của đường cong bị đếm thành một cái co — một spline duy nhất
    ra 1654 cái co (lỗi phát sinh khi thêm đo SPLINE/ELLIPSE ở đợt trước).
 2. Măng sông: chỉ đếm cho đoạn dài hơn một cây ống, trong khi tuyến thật luôn được vẽ
    thành polyline nhiều vertex ngắn — tuyến 100 m ra 0 mối nối.
 3. Thiết bị cùng chủng loại nhưng khác MÃ HIỆU bị tách thành mỗi cái một dòng.
-4. MTEXT mang mã định dạng của CAD làm tên hạng mục ra đầy ký tự điều khiển.
+4. MTEXT/TEXT mang mã định dạng của CAD làm tên hạng mục ra đầy ký tự điều khiển.
+5. Ghi chú kích thước đặt bằng BLOCK có thuộc tính không được dùng làm tên hạng mục.
+6. Layer khác tên nhưng cùng một loại tuyến làm khối lượng bị tách thành nhiều dòng rời.
 """
 import ezdxf
 import pandas as pd
@@ -151,3 +153,54 @@ def test_text_escape_codes_are_decoded(workspace):
     doc = ezdxf.new(units=4)
     text = doc.modelspace().add_text("Ong thep %%c114")
     assert cad_geometry.plain_entity_text(text) == "Ong thep Ø114"
+
+
+def test_dimension_label_stored_in_a_block_attribute_is_used(workspace):
+    """Ghi chú kích thước rất hay được đặt bằng BLOCK có thuộc tính chứ không phải TEXT rời;
+    bỏ qua chúng thì hạng mục giữ nguyên tên layer thô."""
+    doc = ezdxf.new(units=4)
+    msp = doc.modelspace()
+    doc.layers.add("P-CN")
+    msp.add_line((0, 0), (10000, 0), dxfattribs={"layer": "P-CN"})
+    block = doc.blocks.new("NHAN_ONG")
+    block.add_attdef("KICHTHUOC", (0, 0))
+    ref = msp.add_blockref("NHAN_ONG", (5000, 200))
+    ref.add_auto_attribs({"KICHTHUOC": "Ống uPVC Ø110"})
+    doc.saveas(resolve_safe_path("bv.dxf"))
+
+    _, df = _takeoff()
+    assert df["Hạng mục"].astype(str).str.startswith("Ống uPVC Ø110").any()
+    assert not (df["Hạng mục"] == "P-CN").any()
+
+
+def test_equipment_tag_attributes_are_not_used_as_route_names(workspace):
+    """Chỉ thuộc tính CÓ DẠNG KÍCH THƯỚC mới được làm nhãn — mã hiệu thiết bị thì không,
+    nếu không tuyến ống sẽ bị đặt tên là 'L-01'."""
+    doc = ezdxf.new(units=4)
+    msp = doc.modelspace()
+    doc.layers.add("P-CN")
+    msp.add_line((0, 0), (10000, 0), dxfattribs={"layer": "P-CN"})
+    block = doc.blocks.new("DEN_LED")
+    block.add_attdef("TAG", (0, 0))
+    ref = msp.add_blockref("DEN_LED", (5000, 200))
+    ref.add_auto_attribs({"TAG": "L-01"})
+    doc.saveas(resolve_safe_path("bv.dxf"))
+
+    _, df = _takeoff()
+    assert (df["Hạng mục"] == "P-CN").any()
+    assert not (df["Hạng mục"] == "L-01").any()
+
+
+def test_layers_collapsing_to_one_standard_name_are_reported(workspace):
+    """File ghép nhiều nguồn hay có 'ONG_CAP_NUOC' và 'ONG-CAP-NUOC' song song."""
+    doc = ezdxf.new(units=4)
+    msp = doc.modelspace()
+    for layer in ("ONG_CAP_NUOC", "ONG-CAP-NUOC"):
+        doc.layers.add(layer)
+        msp.add_line((0, 0), (10000, 0), dxfattribs={"layer": layer})
+    doc.saveas(resolve_safe_path("bv.dxf"))
+
+    result, df = _takeoff()
+    assert "bị TÁCH thành nhiều dòng rời" in result
+    # Cảnh báo chứ KHÔNG tự gộp: tên chuẩn không phân biệt được nước nóng với nước lạnh.
+    assert len(df[df["Hạng mục"].isin(["ONG_CAP_NUOC", "ONG-CAP-NUOC"])]) == 2

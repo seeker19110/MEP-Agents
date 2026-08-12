@@ -195,6 +195,9 @@ def calc_boq_cost(takeoff_excel_path: str, output_excel_path: str = "du_toan_chi
         name_col = next((c for c in cols if _norm(c) in ("hang muc", "ten cong tac", "noi dung")), None)
         qty_col = next((c for c in cols if _norm(c) in ("khoi luong", "so luong")), None)
         unit_col = next((c for c in cols if _norm(c) == "don vi"), None)
+        # Cột 'Hệ' phải đi tiếp sang bảng dự toán, nếu không `export_boq_vietnam` mất căn
+        # cứ phân chương và lại phải đoán theo tên hạng mục.
+        system_col = next((c for c in cols if _norm(c) == "he"), None)
         
         if not name_col or not qty_col:
             return (f"File '{takeoff_excel_path}' không có cột 'Hạng mục' và 'Khối lượng' cần thiết. "
@@ -216,6 +219,7 @@ def calc_boq_cost(takeoff_excel_path: str, output_excel_path: str = "du_toan_chi
                 missing.append(name)
                 rows.append({
                     "STT": len(rows) + 1, "Mã hiệu": "", "Hạng mục": name,
+                    "Hệ": str(item.get(system_col, "")) if system_col else "",
                     "Đơn vị": str(item.get(unit_col, "")) if unit_col else "", "Khối lượng": qty,
                     "Đơn giá VT": 0, "Đơn giá NC": 0, "Đơn giá M": 0,
                     "Thành tiền VT": 0, "Thành tiền NC": 0, "Thành tiền M": 0,
@@ -226,6 +230,7 @@ def calc_boq_cost(takeoff_excel_path: str, output_excel_path: str = "du_toan_chi
             vt, nc, m = match.get("don_gia_vat_tu", 0.0), match.get("don_gia_nhan_cong", 0.0), match.get("don_gia_may", 0.0)
             rows.append({
                 "STT": len(rows) + 1, "Mã hiệu": str(match.get("ma_hieu", "")), "Hạng mục": name,
+                "Hệ": str(item.get(system_col, "")) if system_col else "",
                 "Đơn vị": str(match.get("don_vi", "")), "Khối lượng": qty,
                 "Đơn giá VT": vt, "Đơn giá NC": nc, "Đơn giá M": m,
                 "Thành tiền VT": round(qty * vt), "Thành tiền NC": round(qty * nc),
@@ -308,12 +313,31 @@ SYSTEM_GROUPS = [
 OTHER_GROUP = ("E", "HẠNG MỤC KHÁC")
 
 
-def classify_boq_group(item_name: str):
-    """Xếp một hạng mục vào chương mục BOQ (A/B/C/D/E) theo từ khóa tên."""
+# Hệ kỹ thuật (theo cột 'Hệ' của bảng khối lượng) -> mã chương mục BOQ tương ứng.
+_SYSTEM_TO_GROUP_CODE = {
+    "HVAC": "A", "Điện": "B", "Cấp thoát nước": "C", "PCCC": "D",
+}
+
+
+def classify_boq_group(item_name: str, system: str = ""):
+    """Xếp một hạng mục vào chương mục BOQ (A/B/C/D/E).
+
+    Ưu tiên cột 'Hệ' do `auto_quantity_takeoff` xác định từ chính LAYER của bản vẽ — đó là
+    căn cứ chắc chắn hơn hẳn việc đoán qua từ khóa trong tên hạng mục. Đoán theo tên làm
+    ống gió trên layer chuẩn 'M-SAD' rơi vào chương "HẠNG MỤC KHÁC" chỉ vì cái tên không
+    chứa chữ "ong gio" — hạng mục HVAC bị xếp nhầm chương ngay trong hồ sơ nộp thầu.
+    Không có cột 'Hệ' (file cũ) thì vẫn đoán theo tên như trước.
+    """
+    code = _SYSTEM_TO_GROUP_CODE.get((system or "").strip())
+    if code:
+        for group_code, title, _ in SYSTEM_GROUPS:
+            if group_code == code:
+                return group_code, title
+
     name = _norm(item_name)
-    for code, title, keywords in SYSTEM_GROUPS:
+    for group_code, title, keywords in SYSTEM_GROUPS:
         if any(kw in name for kw in keywords):
-            return code, title
+            return group_code, title
     return OTHER_GROUP
 
 
@@ -349,10 +373,13 @@ def export_boq_vietnam(boq_excel_path: str, output_excel_path: str = "BOQ_mau_ch
             "nc": next((c for c in df.columns if _norm(c) == "don gia nc"), None),
         }
 
+        system_col = next((c for c in df.columns if _norm(c) == "he"), None)
+
         # Gom hạng mục theo chương mục.
         groups = {}
         for _, item in df.iterrows():
-            code, title = classify_boq_group(str(item[name_col]))
+            code, title = classify_boq_group(str(item[name_col]),
+                                             str(item.get(system_col, "")) if system_col else "")
             groups.setdefault((code, title), []).append(item)
 
         rows = []
@@ -620,6 +647,18 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
 
                 # Bung ruột Block để lấy tuyến ống/dây và thiết bị vẽ BÊN TRONG block —
                 # phần này trước đây bị bỏ sót hoàn toàn (xem `cad_geometry.explode_insert`).
+                # Ghi chú kích thước rất hay được đặt bằng BLOCK có thuộc tính (block nhãn
+                # tuyến) chứ không phải TEXT rời. Bỏ qua chúng thì hạng mục giữ nguyên tên
+                # layer thô dù bản vẽ đã ghi rõ 'Ống uPVC Ø110' ngay cạnh tuyến.
+                # Chỉ nhận giá trị CÓ DẠNG KÍCH THƯỚC (Ø110, DN100, 600x400) để mã hiệu
+                # thiết bị (TAG=L-01) không bị dùng nhầm làm tên hạng mục.
+                for attr_value in attribs.values():
+                    if cad_geometry.parse_nominal_half_width(attr_value or ""):
+                        spec = normalize_mepf_parameter_spec((attr_value or "").strip())
+                        if spec:
+                            texts.append({"text": spec,
+                                          "pos": (entity.dxf.insert.x, entity.dxf.insert.y)})
+
                 inner_segments, inner_inserts = cad_geometry.explode_insert(entity, doc)
                 inner_length = sum(s["length"] for s in inner_segments)
                 if inner_length >= significant_block_length_du:
@@ -956,6 +995,26 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                 "nền kiến trúc (mặc định đang GIỮ chúng lại). Layer MEPF thật nhưng đặt tên tự do cũng rơi vào nhóm này — "
                 "hãy chạy `standardize_cad_drawing` để chuẩn hóa tên layer trước khi bóc.\n\n"
             )
+        # Nhiều layer khác tên nhưng cùng quy về MỘT tên chuẩn (VD 'ONG_CAP_NUOC',
+        # 'ONG-CAP-NUOC', 'ong cap nuoc') làm khối lượng của cùng một loại ống bị xé ra
+        # nhiều dòng. KHÔNG tự gộp: `match_layer` quy cả 'ONG_CAP_NUOC_NONG' (nước nóng)
+        # về cùng khóa với nước lạnh, gộp máy móc sẽ trộn hai loại ống khác hẳn nhau.
+        standard_groups = {}
+        for layer in layer_lengths:
+            key = cad_standards.match_layer(layer)
+            if key:
+                standard_groups.setdefault(key, []).append(layer)
+        split_groups = {k: v for k, v in standard_groups.items() if len(v) > 1}
+        if split_groups:
+            detail = "; ".join(f"{k}: {', '.join(sorted(v))}" for k, v in sorted(split_groups.items()))
+            summary += (
+                f"[CẢNH BÁO] {len(split_groups)} nhóm layer khác tên nhưng cùng mô tả một loại "
+                f"tuyến nên khối lượng bị TÁCH thành nhiều dòng rời: {detail}. Thường do file "
+                f"ghép từ nhiều nguồn đặt tên layer không thống nhất. Tool KHÔNG tự gộp vì tên "
+                f"chuẩn không phân biệt được hết (VD ống nước nóng và nước lạnh cùng quy về một "
+                f"khóa) — chạy `standardize_cad_drawing` hoặc tự cộng các dòng này khi lập dự toán.\n\n"
+            )
+
         if double_line_by_layer:
             total_double_m = dwg_unit.length_m(sum(double_line_by_layer.values()))
             summary += (
