@@ -6,13 +6,18 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
 from src.state import AgentState
 from src.config import settings
-from src.tools import tools
+from src.tools import tools as _base_tools
+from src.cad_block_replace import replace_blocks_by_mapping
 from src.agents import (
     supervisor_node, mechanical_agent_node, electrical_agent_node,
     plumbing_agent_node, firefighting_agent_node,
     qs_agent_node, qs_auditor_agent_node, cad_agent_node, bim_agent_node,
     reviewer_agent_node
 )
+
+# Tool mới đăng ký ngoài `src/tools.py` để tránh đụng file registry quá lớn khi mở rộng
+# từng skill CAD; ToolNode phải thấy đủ tool để thực thi mọi tool_call từ agent.
+tools = list(_base_tools) + [replace_blocks_by_mapping]
 
 # 1. Khởi tạo Graph
 workflow = StateGraph(AgentState)

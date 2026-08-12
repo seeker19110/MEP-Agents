@@ -5,6 +5,7 @@ from src.usage import record_usage
 from pydantic import BaseModel, Field
 from typing import Literal
 from src.tools import get_tools_for_role
+from src.cad_block_replace import replace_blocks_by_mapping
 
 from dotenv import load_dotenv
 from functools import lru_cache
@@ -157,8 +158,13 @@ def build_tools_for_llm(role: str, provider: str = "openai"):
     Anthropic và bật `ANTHROPIC_TOOL_SEARCH`, chuyển sang chế độ tool search: mọi tool
     nghiệp vụ được chuyển thành schema dict có `defer_loading=True` và thêm tool
     `tool_search_tool_regex` để model tự tìm tool cần dùng.
+
+    CAD/QS nhận thêm `replace_blocks_by_mapping` (module riêng, chưa gộp vào
+    TOOLS_BY_ROLE trong tools.py để tránh sửa registry quá lớn khi mở rộng skill).
     """
-    tools = get_tools_for_role(role)
+    tools = list(get_tools_for_role(role))
+    if (role or "").lower().strip() in ("cad", "qs") and replace_blocks_by_mapping not in tools:
+        tools.append(replace_blocks_by_mapping)
     if provider != "anthropic" or not tool_search_enabled() or len(tools) < TOOL_SEARCH_MIN_TOOLS:
         return tools
 
@@ -253,6 +259,11 @@ def qs_agent_node(state: AgentState):
       tự gọi `write_excel` để xuất file Excel thật — TUYỆT ĐỐI KHÔNG được chỉ trả lời lý thuyết suông.
     - QUY TẮC ĐỒNG NHẤT KÝ HIỆU ĐƯỜNG KÍNH: Hiểu rõ các ký hiệu `Ø110` = `D110` = `d110` = `%%c110` = `Φ110` = `OD110` (Đường kính ngoài 110mm) = `DN100` (Đường kính danh nghĩa). Tự động gộp tất cả các ký hiệu này về cùng một hạng mục ống duy nhất khi bóc dự toán.
     - Nếu bản vẽ bị phá Block (nổ Block), hãy yêu cầu/hoặc tự dùng `ai_block_recovery` để phục hồi lại Block trước khi đếm khối lượng.
+    - THAY BLOCK CŨ BẰNG BLOCK CHUẨN (khi khách yêu cầu thay ký hiệu/thiết bị cũ sang chuẩn thư viện):
+      dùng `replace_blocks_by_mapping(file_path=..., mapping_json=...)` — ví dụ mapping đơn giản
+      '{"O_CAM_CU": "SOCKET", "DEN_CU": "LIGHT_DOWNLIGHT"}'. Tool giữ vị trí/scale/rotation, tự import
+      từ mepf_library.dxf nếu thiếu, luôn snapshot trước khi ghi. KHÁC với `standardize_cad_drawing`
+      (chỉ đổi TÊN, không thay hình học Block).
     - DANH MỤC BLOCK CHUẨN ĐỂ PHỤC HỒI CỦA 4 HỆ (CHỨA TRONG TỔNG KHO):
       + HVAC (Cơ Khí): 'DIFFUSER_SUPPLY' (600x600), 'DIFFUSER_RETURN' (600x600), 'FCU' (1000x500)
       + Electrical (Điện): 'LIGHT_PANEL' (600x600), 'LIGHT_DOWNLIGHT' (Tròn R=100), 'SOCKET' (Tròn R=50), 'SWITCH' (Tròn R=30)
@@ -298,6 +309,16 @@ def cad_agent_node(state: AgentState):
     - THỊ GIÁC CAD & NGỮ CẢNH HÌNH HỌC: Bạn dùng `analyze_cad_spatial_context` để đọc hiểu mối liên kết giữa mũi tên chỉ dẫn (Leader), ghi chú kích thước text và các tuyến đường ống kề cận. Dùng `render_cad_image` để xuất hình ảnh PNG trực quan cho người dùng.
     - CÔNG CỤ PHỤC HỒI (AI BLOCK RECOVERY): Khi khách yêu cầu khôi phục bản vẽ vỡ block, dùng công cụ `ai_block_recovery` quét hình dáng (circle/rectangle) để ráp lại thành Block từ Tổng kho.
       + Mẹo: Các block chuẩn 4 hệ MEPF đã có sẵn trong kho gồm: 'DIFFUSER_SUPPLY', 'DIFFUSER_RETURN', 'FCU', 'LIGHT_PANEL', 'LIGHT_DOWNLIGHT', 'SOCKET', 'SWITCH', 'SPRINKLER', 'PUMP'.
+    - THAY BLOCK HÀNG LOẠT THEO MAPPING (khi khách yêu cầu thay ký hiệu/thiết bị cũ sang Block chuẩn):
+      gọi `replace_blocks_by_mapping(file_path=..., mapping_json=...)`.
+      + Dạng đơn giản: '{"O_CAM_CU": "SOCKET", "DEN_CU": "LIGHT_DOWNLIGHT"}'
+      + Dạng chi tiết: '[{"old_block": "O_CAM_CU", "new_block": "SOCKET", "keep_scale": true,
+        "keep_rotation": true, "attribute_map": {"TAG_CU": "MA_HIEU"},
+        "set_attributes": {"MA_HIEU": "E-SOCKET"}, "target_layer": "E-POWER"}]'
+      Tool giữ vị trí chèn, scale/rotation (mặc định), tự import từ mepf_library.dxf nếu bản vẽ chưa có
+      Block đích, luôn snapshot trước khi ghi. KHÁC `standardize_cad_drawing` (chỉ đổi TÊN, không thay
+      hình học). Chỉ xử lý INSERT trên modelspace; sau khi thay có thể gọi `optimize_cad_drawing` để purge
+      định nghĩa Block cũ không còn dùng.
     - CƠ CHẾ AUTO-DRAW (SIÊU NĂNG LỰC): Nếu người dùng yêu cầu chèn một thiết bị máy móc mà không có sẵn trong thư viện, hãy dùng `search_web` tìm kích thước, dùng `execute_python_code` viết script ezdxf vẽ Block đó lưu vào 'data/blocks/mepf_library.dxf', sau đó chèn vào bản vẽ.
     - RÀ SOÁT LỖI BẢN VẼ (BẮT BUỘC khi nhận bản vẽ mới từ khách hoặc khách hỏi "kiểm tra bản vẽ có lỗi
       gì không", "rà soát trước khi duyệt"): gọi NGAY `audit_cad_drawing_errors(file_path=...)` TRƯỚC
@@ -361,7 +382,7 @@ class ReviewResponse(BaseModel):
 # Tool nào được coi là "đã tạo ra sản phẩm thật trên đĩa" cho nhiệm vụ bóc khối
 # lượng / dự toán. Dùng để kiểm tra theo CẤU TRÚC (có tool_call hay không) thay cho
 # blacklist chuỗi tiếng Việt cũ — blacklist chỉ cần LLM đổi cách diễn đạt là lọt.
-DELIVERABLE_TOOLS = {"auto_quantity_takeoff", "write_excel", "calc_boq_cost", "write_word", "write_cad", "edit_cad"}
+DELIVERABLE_TOOLS = {"auto_quantity_takeoff", "write_excel", "calc_boq_cost", "write_word", "write_cad", "edit_cad", "replace_blocks_by_mapping"}
 
 # Từ khóa cho biết lượt yêu cầu này ĐÒI HỎI một file sản phẩm, không chỉ tư vấn miệng.
 _DELIVERABLE_INTENT_KEYWORDS = (
