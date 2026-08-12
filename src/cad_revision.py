@@ -40,21 +40,39 @@ def _revision_dir(file_name: str) -> str:
     return base
 
 
+def _next_sequence(folder: str) -> int:
+    """Số thứ tự tăng dần, không bao giờ lặp lại, cho một thư mục revision.
+
+    Lưu trong một file riêng (`.seq`) thay vì suy từ các file `.dxf` đang có trên đĩa: nếu
+    dựa vào đĩa, `_prune_revisions` xóa bớt revision cũ ngay sau mỗi lần chụp sẽ "giải
+    phóng" một số thứ tự đã dùng, khiến lần chụp kế tiếp cấp lại đúng số đó — hai revision
+    khác nhau trùng tên dù không cùng tồn tại một lúc.
+    """
+    seq_path = os.path.join(folder, ".seq")
+    current = 0
+    try:
+        with open(seq_path, encoding="utf-8") as f:
+            current = int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        current = 0
+    current += 1
+    with open(seq_path, "w", encoding="utf-8") as f:
+        f.write(str(current))
+    return current
+
+
 def _unique_revision_name(folder: str) -> str:
     """Tên revision không bao giờ trùng, kể cả khi hai lần chụp cách nhau dưới 1 mili-giây.
 
     Dấu thời gian đơn thuần là KHÔNG đủ: hai snapshot liên tiếp (ví dụ `edit_cad` gọi ngay
     sau `snapshot_cad`) có thể rơi vào cùng một mili-giây, khiến bản sau ghi đè bản trước
     trong khi lịch sử vẫn ghi hai dòng — người dùng thấy một phiên bản không còn khôi phục
-    đúng nội dung nữa.
+    đúng nội dung nữa. Số thứ tự từ `_next_sequence` đảm bảo duy nhất kể cả sau khi revision
+    cũ đã bị dọn (xem `_next_sequence`).
     """
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-    name = f"rev_{stamp}.dxf"
-    counter = 1
-    while os.path.exists(os.path.join(folder, name)):
-        name = f"rev_{stamp}_{counter}.dxf"
-        counter += 1
-    return name
+    seq = _next_sequence(folder)
+    return f"rev_{stamp}_{seq}.dxf"
 
 
 def _prune_revisions(file_path: str, keep: int = None) -> int:
