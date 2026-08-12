@@ -41,7 +41,8 @@ def calc_duct_size(airflow_lps: float, max_velocity: float = 8.0, max_friction: 
     logger.info(f"Calculating Duct Size: Q={airflow_lps} L/s")
     try:
         Q = airflow_lps / 1000.0  # m3/s
-        if Q <= 0: return "Lưu lượng phải lớn hơn 0."
+        if Q <= 0:
+            return "Lưu lượng phải lớn hơn 0."
         
         area = Q / max_velocity
         D_vel = math.sqrt(4 * area / math.pi) * 1000 
@@ -57,7 +58,7 @@ def calc_duct_size(airflow_lps: float, max_velocity: float = 8.0, max_friction: 
         res = f"Kích thước Ống gió cho Lưu lượng {airflow_lps} L/s (v={max_velocity}m/s):\n"
         res += f"- Ống tròn tối thiểu: Ø{D_round:.0f} mm\n"
         if rect_options:
-            res += f"- Các ống chữ nhật gợi ý (W x H): " + " hoặc ".join(rect_options) + "\n"
+            res += "- Các ống chữ nhật gợi ý (W x H): " + " hoặc ".join(rect_options) + "\n"
         
         return res
     except Exception as e:

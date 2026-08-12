@@ -267,7 +267,7 @@ def calc_smoke_control(area_m2: float, height_m: float, system_type: str = "hut_
             total_m3h = total_flow * 3600
 
             return "\n".join([
-                f"QUẠT TĂNG ÁP BUỒNG THANG (QCVN 06:2022/BXD):",
+                "QUẠT TĂNG ÁP BUỒNG THANG (QCVN 06:2022/BXD):",
                 f"- Chênh áp yêu cầu: 20 - {target_pressure:.0f} Pa so với khu vực kề cận",
                 f"- Lưu lượng qua {num_doors} cửa mở ({door_area_m2} m2/cửa, v = {door_velocity} m/s): "
                 f"{flow_open_doors:.2f} m3/s",
@@ -343,8 +343,8 @@ def calc_fire_detector_qty(area_m2: float, height_m: float = 3.0, detector_type:
             f"- SỐ LƯỢNG CẦN THIẾT: {qty} đầu",
             f"- Khoảng cách giữa các đầu: tối đa {spacing:.1f} m",
             f"- Khoảng cách từ đầu báo tới tường: tối đa {wall_distance:.1f} m",
-            f"- Khoảng cách tối thiểu tới miệng gió điều hòa: 1.0 m (gió thổi làm loãng khói, "
-            f"đầu báo chậm tác động)",
+            "- Khoảng cách tối thiểu tới miệng gió điều hòa: 1.0 m (gió thổi làm loãng khói, "
+            "đầu báo chậm tác động)",
         ]
         if height_m > 12 and is_smoke:
             report.append("- CẢNH BÁO: Trần cao trên 12 m thì đầu báo khói điểm không còn hiệu quả — "

@@ -15,7 +15,6 @@ Toàn bộ so sánh là thống kê hình học xác định, không cần LLM.
 """
 import json
 import logging
-import math
 import os
 import shutil
 import tempfile
@@ -167,7 +166,7 @@ def summarize_drawing(dxf_path: str) -> dict:
     return {
         "blocks": blocks,
         "lengths": {k: round(v, 2) for k, v in lengths.items()},
-        "layers": sorted(l.dxf.name for l in doc.layers),
+        "layers": sorted(layer.dxf.name for layer in doc.layers),
         "entity_count": entity_count,
     }
 

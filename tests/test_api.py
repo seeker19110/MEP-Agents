@@ -3,6 +3,7 @@
 `parse_cad_to_db_task.delay(...)` is mocked everywhere — it would otherwise try to
 publish to a real Redis broker, which isn't available in the test environment.
 """
+import asyncio
 import types
 
 import pytest
@@ -69,6 +70,72 @@ def test_task_status_failure(client, monkeypatch):
     body = resp.json()
     assert body["status"] == "error"
     assert "boom" in body["logs"][0]
+
+
+def test_task_status_progress_reports_processing_with_custom_logs(client, monkeypatch):
+    """Trước khi thêm state PROGRESS, `elif state != 'FAILURE'` sẽ coi state này là
+    'success' giả (xem comment ở `_task_status_payload` trong src/api.py)."""
+    class _Progress:
+        state = "PROGRESS"
+        info = {"logs": ["Đang đọc bản vẽ: drawing.dxf"]}
+
+    monkeypatch.setattr(api, "AsyncResult", lambda task_id, app: _Progress())
+    resp = client.get("/api/v1/task/some-id")
+    body = resp.json()
+    assert body["status"] == "Processing"
+    assert body["logs"] == ["Đang đọc bản vẽ: drawing.dxf"]
+
+
+class _FakeWebSocket:
+    """Double tối giản cho `WebSocket` — chỉ cần đủ để `ws_task_status` gọi được, không
+    cần dựng cả stack ASGI/transport thật (TestClient.websocket_connect bị treo trong môi
+    trường sandbox này, không liên quan tới logic đang kiểm tra)."""
+
+    def __init__(self):
+        self.sent = []
+
+    async def accept(self):
+        pass
+
+    async def send_json(self, data):
+        self.sent.append(data)
+
+    async def close(self):
+        pass
+
+
+class _MutableAsyncResult:
+    """`ws_task_status` gọi `AsyncResult(...)` đúng 1 lần rồi giữ nguyên object đó suốt
+    vòng lặp — giống hệt Celery thật, nơi `.state`/`.info`/`.result` là property tự tra
+    lại backend mỗi lần đọc chứ không phải snapshot. Double ở đây phải MUTATE cùng 1
+    object qua các state thay vì thay cả object, nếu không vòng lặp production sẽ không
+    bao giờ thấy state mới (đây là lỗi thật suýt lọt qua bản nháp đầu của test này)."""
+
+    def __init__(self):
+        self.state = "PENDING"
+        self.info = None
+        self.result = None
+
+
+def test_ws_task_status_pushes_updates_then_closes_on_success(monkeypatch):
+    fake_result = _MutableAsyncResult()
+    states = iter([
+        ("PROGRESS", {"logs": ["Đang xử lý..."]}, None),
+        ("SUCCESS", None, {"excel_path": "boq.xlsx"}),
+    ])
+
+    async def _fake_sleep(_seconds):
+        state, info, result = next(states, (fake_result.state, fake_result.info, fake_result.result))
+        fake_result.state, fake_result.info, fake_result.result = state, info, result
+
+    monkeypatch.setattr(api, "AsyncResult", lambda task_id, app: fake_result)
+    monkeypatch.setattr(api, "_WS_POLL_SLEEP", _fake_sleep)
+
+    ws = _FakeWebSocket()
+    asyncio.run(api.ws_task_status(ws, "some-id"))
+
+    assert [m["status"] for m in ws.sent] == ["Processing", "Processing", "success"]
+    assert ws.sent[-1]["result"] == {"excel_path": "boq.xlsx"}
 
 
 def test_download_returns_error_when_task_not_successful(client, monkeypatch):

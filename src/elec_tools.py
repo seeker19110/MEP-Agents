@@ -113,7 +113,7 @@ def calc_cable_size(power_kw: float, voltage: float = 380, cos_phi: float = 0.85
         report.append(f"- Sụt áp nếu dùng {selected_cable} mm2 trên {length_m} m: {drop_initial:.2f} % "
                       f"(giới hạn {limit:.1f} %)")
         if final_cable > selected_cable:
-            report.append(f"- PHẢI TĂNG TIẾT DIỆN do sụt áp vượt giới hạn.")
+            report.append("- PHẢI TĂNG TIẾT DIỆN do sụt áp vượt giới hạn.")
         report.append(f"- Đề xuất cáp Cu/XLPE/PVC: {final_cable} mm2 (sụt áp {drop_final:.2f} % - ĐẠT)")
         if drop_final > limit:
             report.append("- CẢNH BÁO: Ngay cả tiết diện lớn nhất vẫn vượt giới hạn sụt áp. "
