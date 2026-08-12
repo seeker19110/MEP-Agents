@@ -185,3 +185,30 @@ def test_boq_chapter_falls_back_to_name_without_a_system_column():
     assert classify_boq_group("Ống gió cấp", "")[0] == "A"
     assert classify_boq_group("M-SAD", "HVAC")[0] == "A"
     assert classify_boq_group("M-SAD", "")[0] == "E"
+
+
+def test_revit_boq_carries_the_same_system_column_as_the_cad_path(workspace):
+    """Luồng Revit và luồng AutoCAD phải đối chiếu trực tiếp được với nhau — thêm cột 'Hệ'
+    cho một luồng mà quên luồng kia là phá đúng cam kết đó."""
+    import pandas as pd
+
+    from src.qs_tools import build_revit_boq_excel
+
+    elements = [
+        {"category": "Ducts", "name": "Ống gió chữ nhật", "length_mm": 12000},
+        {"category": "Cable Trays", "name": "Máng cáp 200x100", "length_mm": 8000},
+        {"category": "Lighting Fixtures", "name": "Đèn LED 600"},
+        {"category": "Walls", "name": "Tường 200"},
+    ]
+    # Hàm này ghi thẳng theo đường dẫn được truyền vào (api.py tự dựng đường dẫn tuyệt
+    # đối trong UPLOAD_DIR), không đi qua workspace như các tool khác.
+    path = build_revit_boq_excel(elements, str(workspace / "revit_boq.xlsx"), wastage_percent=0)
+    assert path
+
+    df = pd.read_excel(path)
+    systems = dict(zip(df["Hạng mục"], df["Hệ"]))
+    assert systems["Ống gió chữ nhật"] == "HVAC"
+    assert systems["Máng cáp 200x100"] == "Điện"
+    assert systems["Đèn LED 600"] == "Điện"
+    # Cấu kiện không thuộc hệ MEPF nào vẫn bị đánh dấu y như luồng AutoCAD.
+    assert systems["Tường 200"] == UNKNOWN_SYSTEM_LABEL

@@ -1124,6 +1124,19 @@ def calc_support_hangers(pipe_or_duct_length_m: float, spacing_m: float = 2.0,
         return f"Lỗi tính giá đỡ/ty treo: {e}"
 
 
+def _revit_system(category: str, name: str) -> str:
+    """Hệ kỹ thuật của một cấu kiện Revit, suy từ Category rồi tới tên cấu kiện.
+
+    Luồng AutoCAD gắn cột 'Hệ' cho từng dòng (dùng để phân chương BOQ nộp thầu và để lọc
+    nội dung không phải MEPF). Thiếu cột này thì bảng khối lượng từ Revit KHÔNG còn đối
+    chiếu trực tiếp được với bảng từ AutoCAD nữa, đúng thứ hàm dưới đây cam kết.
+    Category của Revit ('Ducts', 'Pipes', 'Cable Trays') đã đủ để `classify_layer_system`
+    nhận diện qua bảng từ khóa.
+    """
+    return (classify_layer_system(category) or classify_layer_system(name)
+            or UNKNOWN_SYSTEM_LABEL)
+
+
 def build_revit_boq_excel(elements: list[dict], output_excel_path: str,
                            wastage_percent: float = 5.0) -> str | None:
     """Lập bảng khối lượng (BOQ) thật từ payload cấu kiện Revit (xem
@@ -1159,12 +1172,14 @@ def build_revit_boq_excel(elements: list[dict], output_excel_path: str,
         note = f"Category: {category}"
         if wastage_percent > 0:
             note += f" (đã cộng {wastage_percent:.0f}% hao hụt vật tư)"
-        rows.append({"STT": stt, "Hạng mục": name, "Đơn vị": "m",
+        rows.append({"STT": stt, "Hạng mục": name,
+                     "Hệ": _revit_system(category, name), "Đơn vị": "m",
                      "Khối lượng": round(length_with_wastage_m, 2), "Ghi chú": note})
         stt += 1
 
     for (category, name), qty in sorted(count_by_key.items(), key=lambda x: -x[1]):
-        rows.append({"STT": stt, "Hạng mục": name, "Đơn vị": "Cái", "Khối lượng": qty,
+        rows.append({"STT": stt, "Hạng mục": name, "Hệ": _revit_system(category, name),
+                     "Đơn vị": "Cái", "Khối lượng": qty,
                      "Ghi chú": f"Category: {category}"})
         stt += 1
 
