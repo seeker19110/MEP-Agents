@@ -132,3 +132,88 @@ def test_parallel_intent_multi():
     queue = plan_agent_queue(text)
     assert len(queue) >= 2
     assert next_from_queue(queue, completed=["electrical"]) == "qs"
+
+
+def test_supervisor_multi_intent_drains_queue():
+    """Human multi-intent message routes to first agent deterministically."""
+    from langchain_core.messages import HumanMessage
+    import src.agents as agents
+    import src.agents_phase_b_patch  # noqa: F401
+
+    state = {
+        "messages": [HumanMessage(content="Thiết kế hệ thống điện và lập dự toán khối lượng")],
+        "completed_agents": [],
+        "agent_queue": [],
+        "awaiting_human": False,
+        "hil_reason": "",
+        "retry_count": 0,
+        "errors": [],
+        "sender": "",
+        "next": "",
+        "context": {},
+    }
+    out = agents.supervisor_node(state)
+    assert out["next"] in ("electrical", "qs")
+    assert "electrical" in out.get("agent_queue", []) or "qs" in out.get("agent_queue", [])
+    assert len(out.get("agent_queue", [])) >= 2
+
+
+def test_supervisor_hil_cad_gate_and_approve():
+    from langchain_core.messages import AIMessage, HumanMessage
+    import src.agents as agents
+    import src.agents_phase_b_patch  # noqa: F401
+
+    # After CAD + Reviewer approve → HIL pause
+    state = {
+        "messages": [AIMessage(content="[Reviewer Agent] PHÊ DUYỆT: ok", name="ReviewerAgent")],
+        "completed_agents": ["cad"],
+        "agent_queue": ["qs"],
+        "awaiting_human": False,
+        "hil_reason": "",
+        "retry_count": 0,
+        "errors": [],
+        "sender": "cad",
+        "next": "",
+        "context": {},
+    }
+    out = agents.supervisor_node(state)
+    assert out["next"] == "FINISH"
+    assert out.get("awaiting_human") is True
+
+    # Human DUYỆT → clear gate and continue qs
+    state2 = {
+        "messages": [HumanMessage(content="DUYỆT")],
+        "completed_agents": ["cad"],
+        "agent_queue": ["qs"],
+        "awaiting_human": True,
+        "hil_reason": "wait",
+        "retry_count": 0,
+        "errors": [],
+        "sender": "cad",
+        "next": "",
+        "context": {},
+    }
+    out2 = agents.supervisor_node(state2)
+    assert out2.get("awaiting_human") is False
+    assert out2["next"] == "qs"
+
+
+def test_supervisor_drains_remaining_queue_after_reviewer():
+    from langchain_core.messages import AIMessage
+    import src.agents as agents
+    import src.agents_phase_b_patch  # noqa: F401
+
+    state = {
+        "messages": [AIMessage(content="[Reviewer Agent] PHÊ DUYỆT: ok", name="ReviewerAgent")],
+        "completed_agents": ["electrical"],
+        "agent_queue": ["electrical", "qs"],
+        "awaiting_human": False,
+        "hil_reason": "",
+        "retry_count": 0,
+        "errors": [],
+        "sender": "electrical",
+        "next": "",
+        "context": {},
+    }
+    out = agents.supervisor_node(state)
+    assert out["next"] == "qs"
