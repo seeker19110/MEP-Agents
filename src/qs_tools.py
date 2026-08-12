@@ -659,7 +659,8 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
                             texts.append({"text": spec,
                                           "pos": (entity.dxf.insert.x, entity.dxf.insert.y)})
 
-                inner_segments, inner_inserts = cad_geometry.explode_insert(entity, doc)
+                inner_segments, inner_inserts = cad_geometry.explode_insert(
+                    entity, doc, min_run_length=significant_block_length_du)
                 inner_length = sum(s["length"] for s in inner_segments)
                 if inner_length >= significant_block_length_du:
                     # Ngưỡng độ dài: nét vẽ của một KÝ HIỆU (van, đèn, ổ cắm) chỉ dài vài
@@ -797,7 +798,13 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
 
                     nearest_system = seg_systems[min_idx]
                     if nearest_system:
-                        diff_system_mask = seg_systems != nearest_system
+                        # Tuyến KHÔNG tra được hệ (chuỗi rỗng) không phải "hệ khác" — nó là
+                        # hệ CHƯA BIẾT. Coi nó là đối thủ sẽ khiến ghi chú bị bỏ tràn lan
+                        # trên hồ sơ thật, vì bản vẽ nào cũng đầy nét nền kiến trúc không
+                        # tra được hệ chạy sát tuyến MEPF. Đây cũng là chỗ nhánh numpy từng
+                        # lệch với nhánh dự phòng bên dưới: cùng một bản vẽ cho hai bảng
+                        # khối lượng khác nhau tuỳ máy có cài numpy hay không.
+                        diff_system_mask = (seg_systems != nearest_system) & (seg_systems != "")
                         if diff_system_mask.any():
                             alt_min_dist = math.sqrt(np.min(np.where(diff_system_mask, dist_sq, np.inf)))
                             if alt_min_dist <= min_dist * _AMBIGUITY_RATIO:

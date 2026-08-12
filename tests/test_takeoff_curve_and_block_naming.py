@@ -166,3 +166,60 @@ def test_unresolvable_anonymous_block_is_flagged(workspace):
     result, _ = _takeoff()
     assert "ẨN DANH" in result
     assert "*U99" in result
+
+
+@pytest.mark.parametrize("angle", [0, 37, 90, 123])
+def test_ellipse_measures_the_same_at_any_orientation(angle):
+    """Ellipse xoay đứng có `major_axis = (0, r, 0)`. Lấy nhầm thành phần X làm kích thước
+    đặc trưng sẽ kéo độ mịn xấp xỉ xuống ~0, làm ezdxf đệ quy tới lỗi — ngoại lệ đó bị
+    `entity_segments` nuốt và cả tuyến ellipse đo ra 0 m mà không có dấu hiệu gì."""
+    from ezdxf.math import Matrix44
+
+    doc = ezdxf.new(units=4)
+    ellipse = doc.modelspace().add_ellipse((0, 0), major_axis=(3000, 0), ratio=0.6)
+    if angle:
+        ellipse.transform(Matrix44.z_rotate(math.radians(angle)))
+
+    assert cad_geometry.entity_length(ellipse) == pytest.approx(15310.0, rel=1e-3)
+
+
+def test_spline_defined_by_fit_points_is_measured():
+    """SPLINE có thể định nghĩa bằng điểm điều khiển HOẶC điểm đi qua (fit points).
+    Chỉ đọc `control_points` là ra kích thước 0 cho phần lớn spline thực tế."""
+    doc = ezdxf.new(units=4)
+    msp = doc.modelspace()
+
+    by_fit_points = msp.add_spline([(0, 0), (3000, 3000), (6000, 0)])
+    assert not list(by_fit_points.control_points)
+    assert cad_geometry.entity_length(by_fit_points) > 6000
+
+    by_control_points = msp.add_open_spline(
+        [(0, 0), (2000, 3000), (4000, -1000), (6000, 0)], degree=3)
+    assert cad_geometry.entity_length(by_control_points) > 6000
+
+
+def test_symbol_block_is_filtered_the_same_way_at_any_nesting_depth(workspace):
+    """Cùng một cái đèn: chèn thẳng ra bản vẽ thì nét vẽ ký hiệu bị loại khỏi chiều dài
+    ống, nên nằm trong một block khác cũng phải bị loại y như vậy."""
+    def build(path, nested):
+        doc = ezdxf.new(units=4)
+        doc.layers.add("ONG_CAP_NUOC")
+        doc.blocks.new("DEN_LED").add_circle((0, 0), radius=150)
+        msp = doc.modelspace()
+        msp.add_line((0, 0), (20000, 0), dxfattribs={"layer": "ONG_CAP_NUOC"})
+        if nested:
+            cluster = doc.blocks.new("CUM")
+            cluster.add_blockref("DEN_LED", (0, 0))
+            msp.add_blockref("CUM", (5000, 1000))
+        else:
+            msp.add_blockref("DEN_LED", (5000, 1000))
+        doc.saveas(resolve_safe_path(path))
+
+    build("phang.dxf", nested=False)
+    build("long.dxf", nested=True)
+
+    _, flat = _takeoff(file_path="phang.dxf", output_excel_path="a.xlsx")
+    _, nested = _takeoff(file_path="long.dxf", output_excel_path="b.xlsx")
+
+    total = lambda df: df[df["Đơn vị"] == "m"]["Khối lượng"].sum()  # noqa: E731
+    assert total(nested) == pytest.approx(total(flat), rel=1e-6)

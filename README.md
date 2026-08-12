@@ -177,4 +177,6 @@ Toàn bộ "suy nghĩ", thời gian thực thi và lỗi của từng tác nhân
 - [`AI_MODEL_SETUP.md`](AI_MODEL_SETUP.md) — chọn model theo vai trò, chế độ offline, chi phí.
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — Docker, docker-compose kèm Ollama, systemd VPS, Streamlit Cloud.
 - [`MEPF_BACKLOG.md`](MEPF_BACKLOG.md) — lịch sử backlog tính năng (đã xử lý hết) và tool tương ứng.
+- [`docs/AUDIT_BOC_KHOI_LUONG.md`](docs/AUDIT_BOC_KHOI_LUONG.md) — hồ sơ rà soát sai lệch bản vẽ → khối lượng: 19 nguồn đã xử lý, chỗ đã rà sạch, chỗ cố ý không sửa, kiểm kê hằng số.
+- [`docs/PROMPT_RA_SOAT_SAI_LECH.md`](docs/PROMPT_RA_SOAT_SAI_LECH.md) — quy trình/prompt rà soát sai lệch dữ liệu, dùng lại được cho dự án khác.
 - [`Agentic.md`](Agentic.md) — lộ trình phát triển hệ thống Agentic.
