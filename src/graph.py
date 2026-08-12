@@ -21,6 +21,9 @@ from src.agents import (
 import src.agents_phase_a_patch  # noqa: F401
 import src.agents_phase_b_patch  # noqa: F401
 import src.vector_search_bind  # noqa: F401
+import src.cad_loader_perf_patch  # noqa: F401
+import src.agents_perf_patch  # noqa: F401
+import src.qs_perf_patch  # noqa: F401
 from src import agents as _agents_mod
 supervisor_node = _agents_mod.supervisor_node
 
@@ -100,13 +103,12 @@ logger = logging.getLogger(__name__)
 
 
 def build_checkpointer(db_path: str = None):
-    """Checkpointer: Postgres (Phase C) → SQLite → Memory."""
     try:
         from src.checkpointer_factory import try_postgres_checkpointer
         pg = try_postgres_checkpointer()
         if pg is not None:
             return pg
-    except Exception as e:  # pragma: no cover
+    except Exception as e:
         logger.warning("Postgres checkpointer skip: %s", e)
 
     if not db_path:
@@ -119,7 +121,7 @@ def build_checkpointer(db_path: str = None):
             os.makedirs(parent, exist_ok=True)
         conn = sqlite3.connect(db_path, check_same_thread=False)
         return SqliteSaver(conn)
-    except Exception as e:  # pragma: no cover
+    except Exception as e:
         logger.warning("Không dùng được SQLite checkpointer (%s) — tạm dùng RAM.", e)
         return MemorySaver()
 
