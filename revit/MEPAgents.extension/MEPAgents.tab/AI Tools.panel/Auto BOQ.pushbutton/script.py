@@ -5,7 +5,11 @@ Gửi dữ liệu MEP từ Revit sang FastAPI Cloud để phân tích bằng B�
 """
 import json
 import os
-import urllib2  # Dùng cho IronPython 2.7.7 trong Revit
+import urllib.error
+import urllib.request  # Shebang "#! python3" buộc pyRevit chạy bằng CPython3
+                       # (không phải IronPython 2.7) → phải dùng urllib.request / urllib.error
+                       # của Python 3. urllib2 không tồn tại ở Python 3 và sẽ crash
+                       # ngay khi import nếu chạy thật trong Revit.
 from pyrevit import revit, DB, UI, forms
 
 # --- Cấu hình máy chủ AI ------------------------------------------------
@@ -109,13 +113,13 @@ def get_mep_elements():
 
 
 def _post_json(url, payload_dict):
-    payload = json.dumps(payload_dict)
+    payload = json.dumps(payload_dict).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if API_KEY:
         headers["X-API-Key"] = API_KEY
-    req = urllib2.Request(url, data=payload, headers=headers)
-    response = urllib2.urlopen(req, timeout=_REQUEST_TIMEOUT_SEC)
-    return json.loads(response.read())
+    req = urllib.request.Request(url, data=payload, headers=headers)
+    response = urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT_SEC)
+    return json.loads(response.read().decode("utf-8"))
 
 
 def main():
@@ -131,7 +135,7 @@ def main():
             "elements": data,
             "project_name": doc.Title,
         })
-    except urllib2.HTTPError as e:
+    except urllib.error.HTTPError as e:
         if e.code == 401:
             forms.alert(
                 "Server yêu cầu API Key (401 Unauthorized) nhưng plugin chưa có key đúng.\n\n"
@@ -142,7 +146,7 @@ def main():
         else:
             forms.alert("Server trả lỗi HTTP {}: {}".format(e.code, e), title="Lỗi API")
         return
-    except urllib2.URLError as e:
+    except urllib.error.URLError as e:
         forms.alert(
             "Không kết nối được tới MEP-Agents Cloud tại {}.\n\n"
             "Kiểm tra server đã chạy chưa, hoặc đặt biến môi trường "
