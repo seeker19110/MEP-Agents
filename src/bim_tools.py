@@ -21,17 +21,36 @@ from langchain_core.tools import tool
 
 from src import cad_geometry
 from src import cad_loader
+from src import cad_standards
 from src.workspace import resolve_safe_path
 
 logger = logging.getLogger(__name__)
 
 # Nhận diện hệ kỹ thuật từ tên Layer. Khớp theo thứ tự, từ khóa đặc thù đứng trước.
+# CHỈ dùng làm fallback khi `cad_standards.match_layer` (nguồn sự thật duy nhất, dùng
+# chung với `standardize_cad_drawing`) không nhận diện được layer — ví dụ layer đặt tên
+# tự do, chưa từng qua chuẩn hóa, không khớp bất kỳ keyword nào trong LAYER_STANDARD.
+# Trước đây module này tự giữ một bảng từ khóa riêng hoàn toàn tách biệt khỏi
+# cad_standards.py: hai nguồn phân loại "hệ MEPF theo layer" độc lập, dễ lệch nhau khi
+# chỉ một bên được cập nhật (ví dụ thêm layer chuẩn mới vào LAYER_STANDARD mà quên thêm
+# keyword tương ứng ở đây). Gộp về một nguồn chính giải quyết rủi ro đó.
 SYSTEM_KEYWORDS = [
     ("PCCC", ("pccc", "fire", "sprinkler", "ff_", "-ff", "chua chay", "hydrant")),
     ("HVAC", ("hvac", "duct", "gio", "air", "me_", "-me", "chiller", "fcu", "refrigerant")),
     ("Điện", ("elec", "dien", "power", "cable", "tray", "el_", "-el", "light", "lighting")),
     ("Cấp thoát nước", ("plumb", "nuoc", "water", "drain", "waste", "pl_", "-pl", "upvc", "ppr")),
 ]
+
+# `cad_standards.LAYER_STANDARD[...]["discipline"]` dùng tên tiếng Anh (Mechanical,
+# Electrical, Plumbing, Firefighting, General); phần còn lại của module này (và
+# `qs_tools.auto_quantity_takeoff`) dùng nhãn tiếng Việt — quy đổi 1-1 tại đây.
+_DISCIPLINE_TO_VN = {
+    "Mechanical": "HVAC",
+    "Electrical": "Điện",
+    "Plumbing": "Cấp thoát nước",
+    "Firefighting": "PCCC",
+    "General": "",
+}
 
 # Khoảng cách đứng tối thiểu (đơn vị bản vẽ, thường mm) để coi hai tuyến CÁCH XA nhau
 # theo cao độ là không xung đột thật, dù cắt nhau trên mặt bằng. Mặc định 150mm — nhỏ
@@ -54,7 +73,21 @@ _PREFIX_SYSTEM = {"M": "HVAC", "E": "Điện", "P": "Cấp thoát nước", "F":
 
 
 def classify_layer_system(layer_name: str) -> str:
-    """Suy ra hệ kỹ thuật ('HVAC', 'Điện', ...) từ tên layer; '' nếu không nhận ra."""
+    """Suy ra hệ kỹ thuật ('HVAC', 'Điện', ...) từ tên layer; '' nếu không nhận ra.
+
+    Nguồn sự thật chính là `cad_standards.match_layer` (cùng bảng `LAYER_STANDARD`
+    dùng để chuẩn hóa layer) — đảm bảo layer đã chuẩn hóa hoặc gần khớp tên chuẩn luôn
+    được gán đúng hệ, khớp 100% với kết quả của `standardize_cad_drawing`. Chỉ khi
+    `cad_standards` không nhận diện được (layer đặt tên tự do, chưa chuẩn hóa) mới rơi
+    xuống bảng tiền tố/từ khóa cục bộ bên dưới làm phương án dự phòng.
+    """
+    standard_key = cad_standards.match_layer(layer_name)
+    if standard_key:
+        discipline = cad_standards.LAYER_STANDARD[standard_key]["discipline"]
+        vn = _DISCIPLINE_TO_VN.get(discipline, "")
+        if vn:
+            return vn
+
     name = (layer_name or "").lower()
 
     prefix = (layer_name or "").split("-", 1)[0].strip().upper()

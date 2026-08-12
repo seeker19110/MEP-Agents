@@ -195,33 +195,39 @@ LAYER_STANDARD = {
 # một bản vẽ chưa nạp sẵn các linetype đứt/chấm khác.
 LAYER_LINETYPE = "Continuous"
 
+# Đơn vị bóc khối lượng theo thói quen hồ sơ thầu Việt Nam: thiết bị/cấu kiện đơn lẻ
+# lắp rời (đèn, ổ cắm, công tắc, đầu phun, đầu báo...) tính "Cái"; cụm thiết bị trọn bộ
+# có nhiều phụ kiện đi kèm khi lắp đặt (FCU, bơm, tủ điện...) tính "Bộ". Trước đây
+# `auto_quantity_takeoff` (qs_tools.py) gán CỨNG "Bộ" cho MỌI Block bất kể loại, không
+# khớp thói quen hồ sơ ngành — nay tra theo `unit` khai báo ở đây, "Bộ" chỉ còn là giá
+# trị dự phòng cho Block không nhận diện được.
 BLOCK_STANDARD = {
     "DIFFUSER_SUPPLY": {"discipline": "Mechanical", "ma_hieu": "M-DIFF-S", "default_layer": "M-SAD",
-                         "description": "Miệng gió cấp (Supply Diffuser)",
+                         "description": "Miệng gió cấp (Supply Diffuser)", "unit": "Cái",
                          "keywords": ["MIENGGIOCAP", "SUPPLYDIFFUSER", "DIFFUSERCAP", "GIOCAPSA"]},
     "DIFFUSER_RETURN": {"discipline": "Mechanical", "ma_hieu": "M-DIFF-R", "default_layer": "M-RAD",
-                         "description": "Miệng gió hồi (Return Diffuser)",
+                         "description": "Miệng gió hồi (Return Diffuser)", "unit": "Cái",
                          "keywords": ["MIENGGIOHOI", "RETURNDIFFUSER", "DIFFUSERHOI", "GIOHOIRA"]},
     "FCU": {"discipline": "Mechanical", "ma_hieu": "M-FCU", "default_layer": "M-EQUIP-FCU",
-            "description": "Dàn lạnh FCU (Fan Coil Unit)",
+            "description": "Dàn lạnh FCU (Fan Coil Unit)", "unit": "Bộ",
             "keywords": ["FANCOILUNIT", "DANLANH"]},
     "LIGHT_PANEL": {"discipline": "Electrical", "ma_hieu": "E-LT-PANEL", "default_layer": "E-LIGHT",
-                     "description": "Đèn Panel/Downlight vuông",
+                     "description": "Đèn Panel/Downlight vuông", "unit": "Bộ",
                      "keywords": ["DENPANEL", "PANELLIGHT", "DENOPVUONG"]},
     "LIGHT_DOWNLIGHT": {"discipline": "Electrical", "ma_hieu": "E-LT-DL", "default_layer": "E-LIGHT",
-                         "description": "Đèn Downlight âm trần",
+                         "description": "Đèn Downlight âm trần", "unit": "Bộ",
                          "keywords": ["DENDOWNLIGHT", "DOWNLIGHT", "DENAMTRAN"]},
     "SOCKET": {"discipline": "Electrical", "ma_hieu": "E-SOCKET", "default_layer": "E-POWER",
-               "description": "Ổ cắm điện",
+               "description": "Ổ cắm điện", "unit": "Cái",
                "keywords": ["OCAMDIEN", "ELECTRICALOUTLET", "OUTLETSOCKET"]},
     "SWITCH": {"discipline": "Electrical", "ma_hieu": "E-SWITCH", "default_layer": "E-LIGHT-SWITCH",
-               "description": "Công tắc đèn",
+               "description": "Công tắc đèn", "unit": "Cái",
                "keywords": ["CONGTACDEN", "LIGHTSWITCH"]},
     "SPRINKLER": {"discipline": "Firefighting", "ma_hieu": "F-SPRK", "default_layer": "F-SPRINKLER",
-                  "description": "Đầu phun Sprinkler chữa cháy",
+                  "description": "Đầu phun Sprinkler chữa cháy", "unit": "Cái",
                   "keywords": ["DAUPHUNSPRINKLER", "SPRINKLERHEAD"]},
     "PUMP": {"discipline": "Plumbing", "ma_hieu": "P-PUMP", "default_layer": "P-EQUIP-PUMP",
-             "description": "Bơm (cấp nước/PCCC tùy hệ bố trí)",
+             "description": "Bơm (cấp nước/PCCC tùy hệ bố trí)", "unit": "Bộ",
              "keywords": ["WATERPUMP", "MAYBOM"]},
 }
 

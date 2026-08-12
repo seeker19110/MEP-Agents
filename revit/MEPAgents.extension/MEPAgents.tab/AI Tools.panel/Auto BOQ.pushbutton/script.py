@@ -57,7 +57,8 @@ def main():
         response = urllib2.urlopen(req)
         result_json = json.loads(response.read())
         
-        # Báo cáo kết quả bằng cửa sổ Revit
+        # Báo cáo kết quả bằng cửa sổ Revit (bao gồm đường dẫn tải file BOQ Excel thật,
+        # nếu server đã lập được — xem build_revit_boq_excel trong src/qs_tools.py)
         forms.alert("Phân tích thành công!\n\n" + result_json.get("message", ""), title="Swarm AI Report")
     except Exception as e:
         forms.alert("Lỗi kết nối tới MEP-Agents Cloud: " + str(e), title="Lỗi API")

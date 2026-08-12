@@ -1562,6 +1562,7 @@ from src.ff_tools import (
 )
 from src.qs_tools import (
     lookup_unit_price, calc_boq_cost, export_boq_vietnam, auto_quantity_takeoff, calc_support_hangers,
+    build_revit_boq_excel,
 )
 from src.bim_tools import detect_clashes, read_ifc_model, check_pipe_connectivity
 from src.panel_schedule import generate_panel_schedule

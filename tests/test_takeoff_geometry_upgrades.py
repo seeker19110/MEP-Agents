@@ -30,7 +30,8 @@ def test_takeoff_counts_arc_length_correctly(workspace):
     })
     df = pd.read_excel(resolve_safe_path("kl.xlsx"))
     row = df[df["Hạng mục"] == "PIPE_ARC"].iloc[0]
-    assert row["Khối lượng"] == pytest.approx(math.pi * 1000 / 2, rel=1e-3)
+    # Bán kính 1000 đơn vị bản vẽ (mm) -> chiều dài cung quy đổi ra m.
+    assert row["Khối lượng"] == pytest.approx((math.pi * 1000 / 2) / 1000.0, rel=1e-3)
 
 
 def test_takeoff_reports_fittings_as_separate_rows(workspace):
@@ -66,7 +67,8 @@ def test_takeoff_applies_wastage_to_pipe_length_but_not_block_count(workspace):
     df = pd.read_excel(resolve_safe_path("kl.xlsx"))
     pipe_row = df[df["Hạng mục"] == "PIPE_W"].iloc[0]
     socket_row = df[df["Hạng mục"] == "SOCKET"].iloc[0]
-    assert pipe_row["Khối lượng"] == pytest.approx(1000 * 1.08, rel=1e-3)
+    # 1000 đơn vị bản vẽ (mm) -> 1 m, rồi cộng 8% hao hụt.
+    assert pipe_row["Khối lượng"] == pytest.approx(1 * 1.08, rel=1e-3)
     assert socket_row["Khối lượng"] == 1
 
 
@@ -122,7 +124,7 @@ def test_takeoff_reads_dwg_and_notes_conversion(monkeypatch, workspace):
     })
     assert "chuyển .dwg sang .dxf" in result
     df = pd.read_excel(resolve_safe_path("kl.xlsx"))
-    assert df[df["Hạng mục"] == "PIPE_DWG"].iloc[0]["Khối lượng"] == pytest.approx(500.0)
+    assert df[df["Hạng mục"] == "PIPE_DWG"].iloc[0]["Khối lượng"] == pytest.approx(0.5)
 
 
 def test_takeoff_reports_missing_xref_file(workspace):
@@ -158,4 +160,4 @@ def test_takeoff_merges_xref_content_into_totals(workspace):
     assert "Đã gộp nội dung XREF" in result
     df = pd.read_excel(resolve_safe_path("kl.xlsx"))
     assert (df["Hạng mục"] == "PIPE_XREF").any()
-    assert df[df["Hạng mục"] == "PIPE_XREF"].iloc[0]["Khối lượng"] == pytest.approx(300.0)
+    assert df[df["Hạng mục"] == "PIPE_XREF"].iloc[0]["Khối lượng"] == pytest.approx(0.3)

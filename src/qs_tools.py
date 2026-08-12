@@ -421,7 +421,7 @@ import json
 import math
 import pandas as pd
 from ezdxf import audit
-from src import cad_loader, cad_geometry
+from src import cad_loader, cad_geometry, cad_standards
 from src.tools import normalize_mepf_parameter_spec
 from src.bim_tools import classify_layer_system
 
@@ -707,7 +707,13 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
         stt = 1
         for (b_name, attr_str), count in sorted(block_counts.items(), key=lambda x: -x[1]):
             ghi_chu = attr_str if attr_str else ""
-            rows.append({"STT": stt, "Hạng mục": b_name, "Đơn vị": "Bộ", "Khối lượng": count, "Ghi chú": ghi_chu})
+            # Đơn vị tra theo loại Block (đèn/ổ cắm/đầu phun... = "Cái", cụm thiết bị
+            # trọn bộ như FCU/bơm = "Bộ") qua cad_standards.BLOCK_STANDARD, khớp thói
+            # quen hồ sơ thầu VN — "Bộ" chỉ còn là dự phòng khi không nhận diện được
+            # Block (trước đây gán cứng "Bộ" cho mọi Block bất kể loại).
+            block_key = cad_standards.match_block(b_name)
+            unit = cad_standards.BLOCK_STANDARD[block_key]["unit"] if block_key else "Bộ"
+            rows.append({"STT": stt, "Hạng mục": b_name, "Đơn vị": unit, "Khối lượng": count, "Ghi chú": ghi_chu})
             stt += 1
 
         for layer, length in sorted(layer_lengths.items(), key=lambda x: -x[1]):
@@ -718,11 +724,17 @@ def auto_quantity_takeoff(file_path: str, output_excel_path: str = "bao_cao_du_t
             if layer in layer_labels:
                 best_label = max(layer_labels[layer].items(), key=lambda x: x[1])[0]
                 label = best_label
-            length_with_wastage = length * (1 + wastage_percent / 100.0)
+            # `length` (và mọi seg["length"] khác trong hàm này) là đơn vị bản vẽ gốc,
+            # mặc định coi là mm (khớp DEFAULT_PIPE_STOCK_LENGTH = 6000mm = 6m ở
+            # cad_geometry.py). Cột "Khối lượng" ở đây khai đơn vị "m" nên PHẢI đổi
+            # mm -> m trước khi ghi ra — thiếu bước này từng khiến khối lượng xuất ra
+            # sai lệch gấp 1000 lần (bug đã sửa, xem test_qs_tools_units.py).
+            length_m = length / 1000.0
+            length_with_wastage_m = length_m * (1 + wastage_percent / 100.0)
             if wastage_percent > 0:
                 note += f" (đã cộng {wastage_percent:.0f}% hao hụt vật tư)"
             rows.append({"STT": stt, "Hạng mục": label, "Đơn vị": "m",
-                        "Khối lượng": round(length_with_wastage, 2), "Ghi chú": note})
+                        "Khối lượng": round(length_with_wastage_m, 2), "Ghi chú": note})
             stt += 1
 
             fittings = fittings_by_layer.get(layer, {})
@@ -862,5 +874,59 @@ def calc_support_hangers(pipe_or_duct_length_m: float, spacing_m: float = 2.0,
         return "\n".join(report)
     except Exception as e:
         return f"Lỗi tính giá đỡ/ty treo: {e}"
+
+
+def build_revit_boq_excel(elements: list[dict], output_excel_path: str,
+                           wastage_percent: float = 5.0) -> str | None:
+    """Lập bảng khối lượng (BOQ) thật từ payload cấu kiện Revit (xem
+    `revit/MEPAgents.extension/.../Auto BOQ.pushbutton/script.py::get_mep_elements`).
+
+    Trước đây `/api/v1/revit/analyze` chỉ ĐẾM số cấu kiện rồi trả một câu thông báo
+    tĩnh — hoàn toàn không tương đương với `auto_quantity_takeoff` (luồng AutoCAD), dù
+    cùng mục đích bóc khối lượng. Hàm này áp DÙNG CHUNG quy ước đơn vị/hao hụt với
+    `auto_quantity_takeoff`: cấu kiện có `length_mm` (Ống gió/Ống nước — đã được plugin
+    Revit quy đổi feet -> mm) được cộng dồn theo (category, name), đổi mm -> m, cộng
+    `wastage_percent`% hao hụt, làm tròn 2 chữ số thập phân; cấu kiện không có chiều dài
+    (phụ kiện, thiết bị cơ điện) được đếm theo "Cái". Nhờ vậy kết quả từ Revit và AutoCAD
+    dùng cùng đơn vị/quy tắc, có thể đối chiếu trực tiếp thay vì là hai luồng lệch nhau.
+
+    Trả về đường dẫn file Excel đã ghi, hoặc None nếu không có cấu kiện nào để bóc.
+    """
+    length_mm_by_key: dict[tuple[str, str], float] = {}
+    count_by_key: dict[tuple[str, str], int] = {}
+    for el in elements:
+        category = el.get("category") or "Unknown"
+        name = el.get("name") or category
+        key = (category, name)
+        length_mm = el.get("length_mm")
+        if length_mm is not None:
+            length_mm_by_key[key] = length_mm_by_key.get(key, 0.0) + float(length_mm)
+        else:
+            count_by_key[key] = count_by_key.get(key, 0) + 1
+
+    rows = []
+    stt = 1
+    for (category, name), length_mm in sorted(length_mm_by_key.items(), key=lambda x: -x[1]):
+        length_with_wastage_m = (length_mm / 1000.0) * (1 + wastage_percent / 100.0)
+        note = f"Category: {category}"
+        if wastage_percent > 0:
+            note += f" (đã cộng {wastage_percent:.0f}% hao hụt vật tư)"
+        rows.append({"STT": stt, "Hạng mục": name, "Đơn vị": "m",
+                     "Khối lượng": round(length_with_wastage_m, 2), "Ghi chú": note})
+        stt += 1
+
+    for (category, name), qty in sorted(count_by_key.items(), key=lambda x: -x[1]):
+        rows.append({"STT": stt, "Hạng mục": name, "Đơn vị": "Cái", "Khối lượng": qty,
+                     "Ghi chú": f"Category: {category}"})
+        stt += 1
+
+    if not rows:
+        return None
+
+    dir_name = os.path.dirname(output_excel_path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+    pd.DataFrame(rows).to_excel(output_excel_path, index=False, sheet_name="BOQ Revit")
+    return output_excel_path
 
 
