@@ -300,6 +300,14 @@ def cad_agent_node(state: AgentState):
     - CÔNG CỤ PHỤC HỒI (AI BLOCK RECOVERY): Khi khách yêu cầu khôi phục bản vẽ vỡ block, dùng công cụ `ai_block_recovery` quét hình dáng (circle/rectangle) để ráp lại thành Block từ Tổng kho.
       + Mẹo: Các block chuẩn 4 hệ MEPF đã có sẵn trong kho gồm: 'DIFFUSER_SUPPLY', 'DIFFUSER_RETURN', 'FCU', 'LIGHT_PANEL', 'LIGHT_DOWNLIGHT', 'SOCKET', 'SWITCH', 'SPRINKLER', 'PUMP'.
     - CƠ CHẾ AUTO-DRAW (SIÊU NĂNG LỰC): Nếu người dùng yêu cầu chèn một thiết bị máy móc mà không có sẵn trong thư viện, hãy dùng `search_web` tìm kích thước, dùng `execute_python_code` viết script ezdxf vẽ Block đó lưu vào 'data/blocks/mepf_library.dxf', sau đó chèn vào bản vẽ.
+    - RÀ SOÁT LỖI BẢN VẼ (BẮT BUỘC khi nhận bản vẽ mới từ khách hoặc khách hỏi "kiểm tra bản vẽ có lỗi
+      gì không", "rà soát trước khi duyệt"): gọi NGAY `audit_cad_drawing_errors(file_path=...)` TRƯỚC
+      khi xử lý tiếp. Tool này CHỈ ĐỌC (không sửa file), bắt các lỗi khách hàng hay mắc nhất: sai đơn
+      vị bản vẽ (INSUNITS khác mm — lỗi nghiêm trọng nhất, làm sai lệch MỌI kích thước sau đó), vẽ
+      trực tiếp trên Layer "0", Block bị chèn lệch tỷ lệ, text/ghi chú trùng lặp, cỡ chữ không nhất
+      quán, cao độ Z bất thường. Lỗi đơn vị bản vẽ và Block lệch tỷ lệ PHẢI hỏi lại khách xác nhận,
+      KHÔNG được tự ý sửa/giả định. Sau khi rà soát xong mới gọi `optimize_cad_drawing`/
+      `standardize_cad_drawing` nếu khách muốn sửa.
     - TỐI ƯU BẢN VẼ (BẮT BUỘC nếu khách yêu cầu "tối ưu", "dọn dẹp", "làm sạch" bản vẽ, hoặc bạn là model AI
       yếu/offline): gọi NGAY tool `optimize_cad_drawing(file_path=...)`. Tool này tự động (không cần bạn suy
       luận hình học) xóa rác vẽ chiều dài 0, xóa Block trùng lặp, xóa Layer rỗng, và audit làm sạch cấu trúc
@@ -334,6 +342,11 @@ def bim_agent_node(state: AgentState):
       nếu bản vẽ thuần 2D không có Z, tool nói rõ điều đó và mọi điểm đều cần khách đối chiếu cao độ lắp
       đặt thủ công. Tuyến không có ghi chú kích thước gần đó chỉ được xét theo đường tâm — LUÔN truyền
       lại số lượng đoạn thiếu dữ liệu kích thước này cho khách, đừng bỏ qua cảnh báo.
+    - KIỂM TRA KẾT NỐI ĐƯỜNG ỐNG (đầu tuyến hở): Khi khách yêu cầu "kiểm tra kết nối", "tuyến có bị
+      đứt/hở không", "đường ống mồ côi", gọi `check_pipe_connectivity(file_path=...)`. Tool dựng đồ thị
+      topology từng hệ và báo mọi đầu tuyến chỉ có 1 đoạn nối vào (bậc = 1) — CẢNH BÁO RÕ với khách rằng
+      đầu hở có thể là điểm đấu nối hợp lệ vào thiết bị (miệng gió, van, đầu phun...) HOẶC lỗi vẽ thiếu
+      đoạn/đứt tuyến, tool không tự phân biệt được nên cần đối chiếu bằng mắt, đừng kết luận thay khách.
     - CẤM NÓI SUÔNG: Nếu được giao nhiệm vụ đếm block, bóc khối lượng hay lập dự toán, bạn BẮT BUỘC phải
       gọi NGAY tool `auto_quantity_takeoff(file_path=...)` — tool này tự đọc bản vẽ, tự đếm và tự xuất file
       Excel thật sự chỉ trong một lần gọi, phù hợp cả khi bạn là model AI yếu hoặc chạy offline. Chỉ dùng

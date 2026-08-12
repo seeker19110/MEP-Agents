@@ -344,6 +344,92 @@ def detect_clashes(file_path: str, output_excel_path: str = "bao_cao_xung_dot.xl
 
 
 @tool
+def check_pipe_connectivity(file_path: str, output_excel_path: str = "bao_cao_ho_ket_noi.xlsx",
+                            label_search_radius: float = DEFAULT_LABEL_SEARCH_RADIUS) -> str:
+    """Phát hiện các ĐẦU ỐNG/GIÓ/CÁP BỊ HỞ (không kết nối) trên bản vẽ CAD (.dxf/.dwg).
+
+    Với mỗi hệ MEPF (HVAC, Điện, Cấp thoát nước, PCCC) riêng biệt, dựng đồ thị topology từ
+    toàn bộ đoạn tuyến (kể cả cung đã rời rạc hóa) rồi tìm các nút chỉ có ĐÚNG 1 đoạn nối
+    vào (bậc = 1) — đây là đầu tuyến hở: có thể là điểm đấu nối vào thiết bị hợp lệ (miệng
+    gió, van, đầu phun) HOẶC lỗi vẽ thiếu đoạn nối/đứt tuyến. Tool không tự phân biệt được
+    hai trường hợp này (không có dữ liệu thiết bị 3D thật), nên xuất toàn bộ đầu hở để kỹ
+    sư đối chiếu bằng mắt — không kết luận thay. Dùng khi khách yêu cầu "kiểm tra kết nối
+    đường ống", "tuyến có bị đứt/hở không", "đường ống mồ côi".
+    """
+    logger.info("Checking pipe connectivity: %s", file_path)
+    try:
+        doc, load_notes = cad_loader.load_drawing(file_path)
+        msp = doc.modelspace()
+        labels = _extract_labels(msp)
+        segments = _extract_segments(msp, labels=labels, label_radius=label_search_radius)
+
+        if not segments:
+            return ("Không tìm thấy tuyến nào thuộc các hệ MEPF trong bản vẽ (dựa trên tên Layer). "
+                    "Hãy đặt tên Layer theo quy ước có chứa từ khóa hệ (VD: 'HVAC_DUCT', 'ELEC_TRAY', "
+                    "'PCCC_SPRINKLER', 'PLUMB_WASTE') rồi kiểm tra lại.")
+
+        by_system: dict[str, list] = {}
+        for system, layer, a, b, _hw in segments:
+            by_system.setdefault(system, []).append({
+                "start": a, "end": b, "length": math.dist(a[:2], b[:2]), "layer": layer,
+            })
+
+        open_ends = []
+        for system, segs in by_system.items():
+            layer_by_point = {}
+            for seg in segs:
+                p1 = (round(seg["start"][0], 1), round(seg["start"][1], 1), round(seg["start"][2], 1))
+                p2 = (round(seg["end"][0], 1), round(seg["end"][1], 1), round(seg["end"][2], 1))
+                layer_by_point.setdefault(p1, seg["layer"])
+                layer_by_point.setdefault(p2, seg["layer"])
+            for point in cad_geometry.detect_disconnected_pipes(segs):
+                open_ends.append({
+                    "STT": len(open_ends) + 1,
+                    "Hệ": system,
+                    "Layer": layer_by_point.get(point, ""),
+                    "Tọa độ X": point[0], "Tọa độ Y": point[1], "Tọa độ Z": point[2],
+                })
+
+        if not open_ends:
+            systems = sorted(by_system.keys())
+            return (f"KHÔNG phát hiện đầu tuyến hở. Đã kiểm tra {len(segments)} đoạn tuyến "
+                    f"thuộc {len(systems)} hệ: {', '.join(systems)}.")
+
+        out_path = output_excel_path if output_excel_path.endswith(".xlsx") else output_excel_path + ".xlsx"
+        out_safe = resolve_safe_path(out_path)
+        parent = os.path.dirname(out_safe)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        pd.DataFrame(open_ends).to_excel(out_safe, index=False)
+
+        by_pair = {}
+        for e in open_ends:
+            by_pair[e["Hệ"]] = by_pair.get(e["Hệ"], 0) + 1
+
+        report = [
+            f"PHÁT HIỆN {len(open_ends)} ĐẦU TUYẾN HỞ (đã ghi file: {out_path}).",
+            f"- Đã kiểm tra {len(segments)} đoạn tuyến.",
+            "- LƯU Ý: đầu hở có thể là điểm đấu nối hợp lệ vào thiết bị (miệng gió, van, đầu "
+            "phun...) hoặc lỗi vẽ thiếu đoạn/đứt tuyến — cần kỹ sư đối chiếu, tool không tự "
+            "kết luận thay.",
+        ]
+        for note in load_notes:
+            report.append(f"- {note}")
+        report.append("- Thống kê theo hệ:")
+        for system, count in sorted(by_pair.items(), key=lambda x: -x[1]):
+            report.append(f"  + {system}: {count} đầu hở")
+        report.append("- Chi tiết 10 đầu tuyến đầu tiên:")
+        for e in open_ends[:10]:
+            report.append(f"  {e['STT']}. [{e['Hệ']}] Layer {e['Layer']} tại "
+                          f"(X={e['Tọa độ X']:.0f}, Y={e['Tọa độ Y']:.0f}, Z={e['Tọa độ Z']:.0f})")
+        if len(open_ends) > 10:
+            report.append(f"  ... và {len(open_ends) - 10} đầu hở khác trong file Excel.")
+        return "\n".join(report)
+    except Exception as e:
+        return f"Lỗi kiểm tra kết nối đường ống: {e}"
+
+
+@tool
 def read_ifc_model(file_path: str, output_excel_path: str = "ifc_report.xlsx") -> str:
     """Đọc thông tin từ mô hình 3D BIM định dạng IFC (.ifc) sử dụng thư viện ifcopenshell.
 

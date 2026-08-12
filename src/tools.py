@@ -855,6 +855,172 @@ def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) ->
     except Exception as e:
         return f"Lỗi phân tích ngữ cảnh không gian CAD: {e}"
 
+# Bản đồ mã INSUNITS (DXF group code $INSUNITS) sang tên đơn vị dễ đọc.
+_INSUNITS_NAMES = {
+    0: "Không xác định (Unitless)", 1: "Inch", 2: "Feet", 4: "Millimet (mm)",
+    5: "Centimet (cm)", 6: "Met (m)", 8: "Microinch", 9: "Mil",
+}
+
+
+@tool
+def audit_cad_drawing_errors(file_path: str, text_duplicate_tolerance: float = 1.0) -> str:
+    """Kiểm tra CHỈ ĐỌC (không sửa file) các lỗi thường gặp khi khách hàng đẩy bản vẽ CAD
+    vào — dùng khi khách yêu cầu "kiểm tra bản vẽ có lỗi gì không", "rà soát trước khi
+    duyệt", hoặc bất cứ khi nào nhận bản vẽ mới từ bên ngoài trước khi xử lý tiếp. Khác với
+    `optimize_cad_drawing` (tự động XÓA/SỬA), tool này chỉ liệt kê để kỹ sư tự quyết định,
+    vì một số lỗi (VD sai đơn vị) cần hỏi lại khách thay vì tự đoán sửa.
+
+    Các lỗi được kiểm tra (đều là lỗi hay gặp nhất khi nhận bản vẽ từ nguồn khác/khách hàng
+    tự vẽ, không phải lỗi hình học học thuật):
+    1. SAI ĐƠN VỊ BẢN VẼ (INSUNITS != Millimet): lỗi nghiêm trọng nhất — nếu khách vẽ bằng
+       inch/m/cm nhưng hệ thống đọc là mm (hoặc ngược lại), MỌI kích thước/khối lượng tính
+       ra sau đó đều sai lệch hàng chục đến hàng nghìn lần dù hình học trông "bình thường".
+    2. VẼ TRỰC TIẾP TRÊN LAYER "0": thói quen xấu phổ biến khiến đối tượng luôn thừa kế màu/
+       linetype theo Block cha thay vì Layer riêng, gây khó kiểm soát khi chỉnh sửa hàng loạt.
+    3. BLOCK BỊ CHÈN LỆCH TỶ LỆ (scale distortion): Block insert với x-scale khác y-scale
+       hoặc khác 1 — khiến kích thước thực tế của thiết bị/ký hiệu sai lệch so với định nghĩa
+       gốc, dễ gây bóc khối lượng/kiểm tra khoảng cách lắp đặt sai.
+    4. TEXT/MTEXT TRÙNG LẶP: hai ghi chú có nội dung giống hệt nhau đặt gần nhau (trong phạm
+       vi `text_duplicate_tolerance`) — thường do copy/paste nhầm, gây đếm nhầm khi bóc tách.
+    5. NHIỀU CHIỀU CAO CHỮ KHÔNG NHẤT QUÁN: bản vẽ dùng quá nhiều cỡ chữ khác nhau cho ghi
+       chú kích thước (dấu hiệu ghép nhiều nguồn bản vẽ không đồng bộ chuẩn trình bày).
+    6. CAO ĐỘ Z BẤT THƯỜNG: đối tượng có Z khác 0 lẫn trong bản vẽ chủ yếu phẳng (Z=0) — có
+       thể do vô tình vẽ/copy nhầm cao độ, khiến đối tượng trông đúng trên mặt bằng nhưng
+       thực chất lệch cao độ so với phần còn lại.
+    """
+    logger.info("Auditing CAD drawing errors (read-only): %s", file_path)
+    try:
+        doc, load_notes = cad_loader.load_drawing(file_path)
+        msp = doc.modelspace()
+
+        issues = []
+
+        # 1. Đơn vị bản vẽ.
+        insunits = doc.header.get('$INSUNITS', 0)
+        if insunits != 4:
+            unit_name = _INSUNITS_NAMES.get(insunits, f"Mã INSUNITS={insunits} (không xác định)")
+            issues.append(
+                f"[NGHIÊM TRỌNG] Đơn vị bản vẽ hiện là '{unit_name}', KHÔNG PHẢI Millimet (mm). "
+                f"Toàn bộ hệ thống giả định bản vẽ vẽ bằng mm — nếu khách thực sự vẽ bằng đơn vị "
+                f"khác, MỌI kích thước/khối lượng tính từ bản vẽ này đều SAI LỆCH. Cần hỏi lại "
+                f"khách đơn vị vẽ thực tế trước khi xử lý tiếp."
+            )
+
+        # 2. Vẽ trực tiếp trên Layer "0".
+        layer0_types = {}
+        for entity in msp:
+            if entity.dxf.layer == "0" and entity.dxftype() != "INSERT":
+                layer0_types[entity.dxftype()] = layer0_types.get(entity.dxftype(), 0) + 1
+        if layer0_types:
+            total_l0 = sum(layer0_types.values())
+            breakdown = ", ".join(f"{t}: {c}" for t, c in sorted(layer0_types.items(), key=lambda x: -x[1]))
+            issues.append(
+                f"[CẢNH BÁO] {total_l0} đối tượng vẽ trực tiếp trên Layer '0' thay vì Layer riêng "
+                f"({breakdown}) — nên chuyển sang Layer đúng hệ để dễ kiểm soát màu/hiển thị/tắt-mở."
+            )
+
+        # 3. Block chèn lệch tỷ lệ.
+        scale_issues = {}
+        for entity in msp.query('INSERT'):
+            xs, ys = round(entity.dxf.xscale, 3), round(entity.dxf.yscale, 3)
+            if abs(xs - ys) > 0.01 or abs(xs - 1.0) > 0.05:
+                key = (entity.dxf.name, xs, ys)
+                scale_issues[key] = scale_issues.get(key, 0) + 1
+        if scale_issues:
+            top = sorted(scale_issues.items(), key=lambda x: -x[1])[:10]
+            detail = "; ".join(f"{name} (scale {xs}x{ys}) x{count}" for (name, xs, ys), count in top)
+            issues.append(
+                f"[CẢNH BÁO] {sum(scale_issues.values())} lượt Block bị chèn LỆCH TỶ LỆ (không phải "
+                f"1:1 hoặc x-scale khác y-scale): {detail}"
+                + (f" ... và {len(scale_issues) - 10} loại khác" if len(scale_issues) > 10 else "")
+                + " — kích thước thực tế trên bản vẽ khác định nghĩa gốc của Block, cần khách xác nhận."
+            )
+
+        # 4. Text/MTEXT trùng lặp (cùng nội dung, vị trí gần nhau).
+        text_entries = []
+        for entity in msp:
+            dxftype = entity.dxftype()
+            if dxftype == "TEXT":
+                txt, pos = (entity.dxf.text or "").strip(), entity.dxf.insert
+            elif dxftype == "MTEXT":
+                txt, pos = (entity.text or "").strip(), entity.dxf.insert
+            else:
+                continue
+            if txt:
+                text_entries.append((txt, pos.x, pos.y))
+
+        seen_text = []
+        dup_count = 0
+        dup_samples = []
+        for txt, x, y in text_entries:
+            is_dup = False
+            for txt2, x2, y2 in seen_text:
+                if txt == txt2 and math.hypot(x - x2, y - y2) <= text_duplicate_tolerance:
+                    is_dup = True
+                    break
+            if is_dup:
+                dup_count += 1
+                if len(dup_samples) < 5:
+                    dup_samples.append(f"'{txt}' tại ({x:.0f}, {y:.0f})")
+            else:
+                seen_text.append((txt, x, y))
+        if dup_count:
+            issues.append(
+                f"[CẢNH BÁO] {dup_count} ghi chú TEXT/MTEXT trùng lặp nội dung + vị trí gần nhau "
+                f"(trong phạm vi {text_duplicate_tolerance}mm), VD: {'; '.join(dup_samples)} — có thể "
+                f"do copy/paste nhầm, gây đếm sai khi bóc tách khối lượng dựa trên ghi chú."
+            )
+
+        # 5. Chiều cao chữ không nhất quán.
+        heights = []
+        for entity in msp:
+            if entity.dxftype() == "TEXT" and entity.dxf.hasattr("height"):
+                heights.append(round(entity.dxf.height, 1))
+            elif entity.dxftype() == "MTEXT" and entity.dxf.hasattr("char_height"):
+                heights.append(round(entity.dxf.char_height, 1))
+        distinct_heights = sorted(set(heights))
+        if len(distinct_heights) > 5:
+            issues.append(
+                f"[GHI CHÚ] Bản vẽ dùng {len(distinct_heights)} cỡ chữ khác nhau cho TEXT/MTEXT "
+                f"({distinct_heights[:10]}{'...' if len(distinct_heights) > 10 else ''}) — có thể là "
+                f"dấu hiệu ghép nhiều nguồn bản vẽ không đồng bộ chuẩn trình bày, nên thống nhất lại."
+            )
+
+        # 6. Cao độ Z bất thường trong bản vẽ chủ yếu phẳng.
+        z_values = []
+        for entity in msp:
+            points = cad_geometry.entity_points_3d(entity)
+            z_values.extend(p[2] for p in points)
+        if z_values:
+            nonzero = [z for z in z_values if abs(z) > 1e-6]
+            if nonzero and len(nonzero) < len(z_values) * 0.05:
+                distinct_z = sorted(set(round(z, 1) for z in nonzero))
+                issues.append(
+                    f"[GHI CHÚ] {len(nonzero)}/{len(z_values)} điểm có cao độ Z khác 0 "
+                    f"(Z = {distinct_z[:10]}) trong khi phần lớn bản vẽ phẳng (Z=0) — kiểm tra xem có "
+                    f"đối tượng nào vô tình bị vẽ/copy sai cao độ hay không."
+                )
+
+        if not issues:
+            return (f"KHÔNG phát hiện lỗi phổ biến nào trong bản vẽ. Đã kiểm tra: đơn vị bản vẽ, "
+                    f"đối tượng trên Layer 0, Block lệch tỷ lệ, text trùng lặp, độ nhất quán cỡ "
+                    f"chữ, cao độ Z bất thường.")
+
+        report = [f"RÀ SOÁT LỖI BẢN VẼ ({len(issues)} vấn đề phát hiện, chỉ đọc — chưa sửa file):"]
+        for note in load_notes:
+            report.append(f"- {note}")
+        for i, issue in enumerate(issues, 1):
+            report.append(f"{i}. {issue}")
+        report.append(
+            "- Lưu ý: Đây là công cụ RÀ SOÁT (read-only). Dùng `optimize_cad_drawing` để tự động "
+            "sửa rác hình học/trùng lặp Block, `standardize_cad_drawing` để chuẩn hóa tên Layer/"
+            "Block — lỗi đơn vị bản vẽ và Block lệch tỷ lệ cần XÁC NHẬN với khách trước khi sửa."
+        )
+        return "\n".join(report)
+    except Exception as e:
+        return f"Lỗi rà soát bản vẽ CAD: {e}"
+
+
 @tool
 def optimize_cad_drawing(file_path: str, output_path: str = "", dedupe_tolerance: float = 1.0) -> str:
     """Tối ưu & dọn dẹp bản vẽ CAD (.dxf) TỰ ĐỘNG, thuần hình học (KHÔNG dùng LLM) — phù
@@ -1375,23 +1541,29 @@ def lookup_equipment_catalog(equipment_type: str, search_kw: str) -> str:
 from src.hvac_tools import (
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
     calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
+    calc_cooling_tower, calc_fresh_air_ashrae, calc_vrv_outdoor_unit,
 )
 from src.elec_tools import calc_cable_size, calc_breaker_size, calc_lighting_qty
 from src.plumb_tools import (
     calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
     calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
+    calc_vent_pipe, calc_grease_trap, calc_sump_pump,
 )
 from src.ff_tools import calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty
 from src.elec_tools import (
     calc_voltage_drop, calc_total_load, calc_short_circuit,
     calc_cable_tray_size, calc_lightning_protection,
+    calc_emergency_lighting, calc_power_factor_correction,
 )
 from src.hvac_tools import calc_nc_level
 from src.ff_tools import (
     calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
+    calc_gas_suppression, calc_fire_water_tank,
 )
-from src.qs_tools import lookup_unit_price, calc_boq_cost, export_boq_vietnam, auto_quantity_takeoff
-from src.bim_tools import detect_clashes, read_ifc_model
+from src.qs_tools import (
+    lookup_unit_price, calc_boq_cost, export_boq_vietnam, auto_quantity_takeoff, calc_support_hangers,
+)
+from src.bim_tools import detect_clashes, read_ifc_model, check_pipe_connectivity
 from src.panel_schedule import generate_panel_schedule
 from src.cad_revision import (
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
@@ -1402,17 +1574,23 @@ tools = [
     read_excel, write_excel, read_word, write_word, read_pdf,
     read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image, analyze_cad_spatial_context,
     auto_quantity_takeoff, optimize_cad_drawing, standardize_cad_drawing, convert_dwg_to_dxf, add_color_legend,
+    audit_cad_drawing_errors,
     calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
     calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
+    calc_cooling_tower, calc_fresh_air_ashrae, calc_vrv_outdoor_unit,
     calc_cable_size, calc_breaker_size, calc_lighting_qty, calc_voltage_drop,
     calc_total_load, calc_short_circuit, calc_cable_tray_size, calc_lightning_protection,
+    calc_emergency_lighting, calc_power_factor_correction,
     generate_panel_schedule,
     calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
     calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
+    calc_vent_pipe, calc_grease_trap, calc_sump_pump,
     calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty,
     calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
+    calc_gas_suppression, calc_fire_water_tank,
     calc_nc_level,
-    lookup_unit_price, calc_boq_cost, export_boq_vietnam, detect_clashes, read_ifc_model,
+    lookup_unit_price, calc_boq_cost, export_boq_vietnam, calc_support_hangers,
+    detect_clashes, read_ifc_model, check_pipe_connectivity,
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
     auto_route_mepf_path, generate_calculation_report, lookup_equipment_catalog, extract_new_blocks_to_library
 ]
@@ -1430,35 +1608,38 @@ TOOLS_BY_ROLE = {
         calc_cooling_load, calc_cooling_load_detailed, calc_duct_size, calc_duct_total_pressure_loss,
         calc_psychrometrics, calc_chw_pipe_size, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
         calc_pump_fan_power, calc_ventilation_rate, calc_nc_level,
+        calc_cooling_tower, calc_fresh_air_ashrae, calc_vrv_outdoor_unit,
     ],
     "electrical": _COMMON_TOOLS + [
         calc_cable_size, calc_breaker_size, calc_lighting_qty, calc_voltage_drop,
         calc_total_load, calc_short_circuit, calc_cable_tray_size, calc_lightning_protection,
-        generate_panel_schedule,
+        generate_panel_schedule, calc_emergency_lighting, calc_power_factor_correction,
     ],
     "plumbing": _COMMON_TOOLS + [
         calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
         calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
+        calc_vent_pipe, calc_grease_trap, calc_sump_pump,
     ],
     "firefighting": _COMMON_TOOLS + [
         calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty,
         calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
+        calc_gas_suppression, calc_fire_water_tank,
     ],
     "qs": _COMMON_TOOLS + [
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, ai_block_recovery,
-        lookup_unit_price, calc_boq_cost, export_boq_vietnam, convert_dwg_to_dxf,
+        lookup_unit_price, calc_boq_cost, export_boq_vietnam, convert_dwg_to_dxf, calc_support_hangers,
     ],
     "cad": _COMMON_TOOLS + [
         read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image,
         analyze_cad_spatial_context, execute_python_code, optimize_cad_drawing,
         standardize_cad_drawing, auto_route_mepf_path, extract_new_blocks_to_library,
         snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
-        convert_dwg_to_dxf, add_color_legend,
+        convert_dwg_to_dxf, add_color_legend, audit_cad_drawing_errors,
     ],
     "bim": _COMMON_TOOLS + [
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, detect_clashes,
-        read_ifc_model,
-        diff_cad_revisions, list_cad_revisions, convert_dwg_to_dxf,
+        check_pipe_connectivity, read_ifc_model,
+        diff_cad_revisions, list_cad_revisions, convert_dwg_to_dxf, audit_cad_drawing_errors,
     ],
 }
 

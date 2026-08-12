@@ -402,3 +402,108 @@ def calc_lightning_protection(length_m: float, width_m: float, height_m: float,
         ])
     except Exception as e:
         return f"Lỗi tính chống sét/tiếp địa: {e}"
+
+
+@tool
+def calc_emergency_lighting(corridor_length_m: float, open_area_m2: float = 0.0,
+                            luminaire_spacing_m: float = 15.0, exit_sign_spacing_m: float = 20.0) -> str:
+    """
+    Tính số lượng đèn chiếu sáng sự cố và đèn EXIT/chỉ dẫn thoát nạn theo TCVN 3890/QCVN 06 —
+    khác hoàn toàn `calc_lighting_qty` (chiếu sáng làm việc bình thường), hay bị nhầm lẫn hoặc
+    bỏ sót khi chỉ tính chiếu sáng thường mà quên hệ chiếu sáng sự cố độc lập.
+    Tham số:
+    - corridor_length_m: Tổng chiều dài hành lang/lối thoát nạn cần chiếu sáng sự cố (m).
+    - open_area_m2: Diện tích khu vực mở (sảnh, phòng lớn) cần chiếu sáng sự cố (m2, tùy chọn).
+    - luminaire_spacing_m: Khoảng cách tối đa giữa các đèn sự cố dọc lối thoát nạn (m, mặc định 15).
+    - exit_sign_spacing_m: Khoảng cách tối đa giữa các đèn EXIT/chỉ dẫn hướng thoát (m, mặc định 20).
+    """
+    logger.info(f"Calculating Emergency Lighting: corridor={corridor_length_m}m")
+    try:
+        if corridor_length_m <= 0 and open_area_m2 <= 0:
+            return "Lỗi: Phải cung cấp chiều dài hành lang hoặc diện tích khu vực mở."
+
+        qty_corridor = math.ceil(corridor_length_m / luminaire_spacing_m) + 1 if corridor_length_m > 0 else 0
+        qty_exit_sign = math.ceil(corridor_length_m / exit_sign_spacing_m) + 1 if corridor_length_m > 0 else 0
+        # Đèn sự cố khu vực mở: mật độ tối thiểu để đạt độ rọi 0.5 lux, ước tính 1 đèn/40m2.
+        qty_open_area = math.ceil(open_area_m2 / 40.0) if open_area_m2 > 0 else 0
+
+        report = [
+            "CHIẾU SÁNG SỰ CỐ & CHỈ DẪN THOÁT NẠN (TCVN 3890 / QCVN 06:2022/BXD):",
+        ]
+        if corridor_length_m > 0:
+            report += [
+                f"- Đèn chiếu sáng sự cố dọc hành lang ({corridor_length_m} m, khoảng cách tối đa "
+                f"{luminaire_spacing_m} m/đèn): {qty_corridor} đèn",
+                f"- Đèn EXIT/chỉ dẫn hướng thoát (khoảng cách tối đa {exit_sign_spacing_m} m, bắt buộc "
+                f"tại mọi cửa thoát nạn và điểm đổi hướng): {qty_exit_sign} đèn",
+            ]
+        if open_area_m2 > 0:
+            report.append(f"- Đèn chiếu sáng sự cố khu vực mở ({open_area_m2} m2): {qty_open_area} đèn")
+
+        report += [
+            "- Độ rọi tối thiểu: 1 lux dọc tâm lối thoát nạn, 0.5 lux tại khu vực mở (TCVN 3890).",
+            "- Thời gian duy trì hoạt động khi mất điện lưới: TỐI THIỂU 120 phút (ắc quy dự phòng "
+            "tích hợp hoặc cấp nguồn ưu tiên từ máy phát).",
+            "- Đèn EXIT BẮT BUỘC tại mọi cửa thoát nạn, đầu và cuối hành lang, mỗi điểm đổi hướng, "
+            "và tại các nút giao hành lang — đây là hạng mục hay bị bỏ sót khi chỉ vẽ đèn chiếu "
+            "sáng thường mà không tách riêng mạch chiếu sáng sự cố có nguồn ưu tiên.",
+        ]
+        return "\n".join(report)
+    except Exception as e:
+        return f"Lỗi tính chiếu sáng sự cố: {e}"
+
+
+# Bước tụ bù tiêu chuẩn (kVAr) phổ biến trên thị trường.
+STANDARD_CAPACITOR_STEPS_KVAR = [2.5, 5, 7.5, 10, 12.5, 15, 20, 25, 30, 40, 50, 60, 75, 100]
+
+
+@tool
+def calc_power_factor_correction(active_power_kw: float, current_cos_phi: float,
+                                 target_cos_phi: float = 0.95) -> str:
+    """
+    Tính dung lượng tụ bù công suất phản kháng (kVAr) cần thiết để nâng hệ số công suất
+    (cos φ) hiện tại lên mức yêu cầu — hạng mục hay bị bỏ sót khi lập hồ sơ thiết kế tủ điện
+    tổng, dù hầu hết công trình đều bị phạt tiền điện nếu cos φ dưới 0.9 (theo quy định EVN).
+    Tham số:
+    - active_power_kw: Công suất tác dụng (kW) tại điểm đặt tụ bù (thường tại tủ điện tổng).
+    - current_cos_phi: Hệ số công suất hiện tại (chưa bù), VD 0.75.
+    - target_cos_phi: Hệ số công suất mục tiêu sau khi bù (mặc định 0.95, tối thiểu EVN yêu
+      cầu thường là 0.9).
+    """
+    logger.info(f"Calculating Power Factor Correction: P={active_power_kw}kW, cos1={current_cos_phi}")
+    try:
+        if not (0 < current_cos_phi <= 1) or not (0 < target_cos_phi <= 1):
+            return "Lỗi: Hệ số công suất phải trong khoảng (0, 1]."
+        if target_cos_phi <= current_cos_phi:
+            return "Lỗi: Hệ số công suất mục tiêu phải LỚN HƠN hệ số công suất hiện tại."
+
+        tan_phi1 = math.tan(math.acos(current_cos_phi))
+        tan_phi2 = math.tan(math.acos(target_cos_phi))
+        q_required_kvar = active_power_kw * (tan_phi1 - tan_phi2)
+
+        selected_kvar = STANDARD_CAPACITOR_STEPS_KVAR[-1]
+        for step in STANDARD_CAPACITOR_STEPS_KVAR:
+            if step >= q_required_kvar:
+                selected_kvar = step
+                break
+
+        # Dòng điện giảm được sau khi bù (tại cùng công suất tác dụng, điện áp 380V 3 pha).
+        current_before = active_power_kw * 1000 / (math.sqrt(3) * 380 * current_cos_phi)
+        current_after = active_power_kw * 1000 / (math.sqrt(3) * 380 * target_cos_phi)
+        current_reduction_pct = (1 - current_after / current_before) * 100 if current_before > 0 else 0
+
+        return "\n".join([
+            f"Tính tụ bù công suất phản kháng (P = {active_power_kw} kW, cos φ: {current_cos_phi} "
+            f"-> {target_cos_phi}):",
+            f"- Công suất phản kháng cần bù (Qc): {q_required_kvar:.1f} kVAr",
+            f"=> CHỌN TỦ BÙ TIÊU CHUẨN: {selected_kvar} kVAr (nên chia nhiều cấp/bước bù tự động "
+            f"theo tải thực tế thay vì bù cố định một cấp nếu tải biến động lớn)",
+            f"- Dòng điện giảm sau khi bù: {current_before:.1f} A -> {current_after:.1f} A "
+            f"(giảm {current_reduction_pct:.1f} %)",
+            "- Tụ bù nên đặt gần trung tâm phụ tải (tủ điện tổng hoặc tủ phân phối tầng có tải "
+            "cảm kháng lớn: động cơ, máy biến áp) để giảm tổn thất trên đường dây phía trước.",
+            "- BẮT BUỘC có bộ điều khiển bù tự động (relay cos φ) nếu tải biến động theo thời gian, "
+            "tránh bù dư gây quá áp khi tải thấp.",
+        ])
+    except Exception as e:
+        return f"Lỗi tính tụ bù công suất: {e}"
