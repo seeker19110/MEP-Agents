@@ -16,6 +16,8 @@ from src.agents import (
     qs_agent_node, qs_auditor_agent_node, cad_agent_node, bim_agent_node,
     reviewer_agent_node
 )
+# Bind Phase A skills into agents.build_tools_for_llm / DELIVERABLE_TOOLS
+import src.agents_phase_a_patch  # noqa: F401
 
 # Tool mới đăng ký ngoài `src/tools.py` để tránh đụng file registry quá lớn khi mở rộng
 # từng skill CAD; ToolNode phải thấy đủ tool để thực thi mọi tool_call từ agent.
