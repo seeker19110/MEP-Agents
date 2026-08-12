@@ -334,6 +334,11 @@ def bim_agent_node(state: AgentState):
       nếu bản vẽ thuần 2D không có Z, tool nói rõ điều đó và mọi điểm đều cần khách đối chiếu cao độ lắp
       đặt thủ công. Tuyến không có ghi chú kích thước gần đó chỉ được xét theo đường tâm — LUÔN truyền
       lại số lượng đoạn thiếu dữ liệu kích thước này cho khách, đừng bỏ qua cảnh báo.
+    - KIỂM TRA KẾT NỐI ĐƯỜNG ỐNG (đầu tuyến hở): Khi khách yêu cầu "kiểm tra kết nối", "tuyến có bị
+      đứt/hở không", "đường ống mồ côi", gọi `check_pipe_connectivity(file_path=...)`. Tool dựng đồ thị
+      topology từng hệ và báo mọi đầu tuyến chỉ có 1 đoạn nối vào (bậc = 1) — CẢNH BÁO RÕ với khách rằng
+      đầu hở có thể là điểm đấu nối hợp lệ vào thiết bị (miệng gió, van, đầu phun...) HOẶC lỗi vẽ thiếu
+      đoạn/đứt tuyến, tool không tự phân biệt được nên cần đối chiếu bằng mắt, đừng kết luận thay khách.
     - CẤM NÓI SUÔNG: Nếu được giao nhiệm vụ đếm block, bóc khối lượng hay lập dự toán, bạn BẮT BUỘC phải
       gọi NGAY tool `auto_quantity_takeoff(file_path=...)` — tool này tự đọc bản vẽ, tự đếm và tự xuất file
       Excel thật sự chỉ trong một lần gọi, phù hợp cả khi bạn là model AI yếu hoặc chạy offline. Chỉ dùng

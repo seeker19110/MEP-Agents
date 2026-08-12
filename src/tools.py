@@ -1391,7 +1391,7 @@ from src.ff_tools import (
     calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
 )
 from src.qs_tools import lookup_unit_price, calc_boq_cost, export_boq_vietnam, auto_quantity_takeoff
-from src.bim_tools import detect_clashes, read_ifc_model
+from src.bim_tools import detect_clashes, read_ifc_model, check_pipe_connectivity
 from src.panel_schedule import generate_panel_schedule
 from src.cad_revision import (
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
@@ -1412,7 +1412,7 @@ tools = [
     calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty,
     calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
     calc_nc_level,
-    lookup_unit_price, calc_boq_cost, export_boq_vietnam, detect_clashes, read_ifc_model,
+    lookup_unit_price, calc_boq_cost, export_boq_vietnam, detect_clashes, read_ifc_model, check_pipe_connectivity,
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
     auto_route_mepf_path, generate_calculation_report, lookup_equipment_catalog, extract_new_blocks_to_library
 ]
@@ -1457,7 +1457,7 @@ TOOLS_BY_ROLE = {
     ],
     "bim": _COMMON_TOOLS + [
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, detect_clashes,
-        read_ifc_model,
+        check_pipe_connectivity, read_ifc_model,
         diff_cad_revisions, list_cad_revisions, convert_dwg_to_dxf,
     ],
 }
