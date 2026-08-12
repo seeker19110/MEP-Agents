@@ -8,6 +8,8 @@ from src.state import AgentState
 from src.config import settings
 from src.tools import tools as _base_tools
 from src.cad_block_replace import replace_blocks_by_mapping
+from src.cad_batch_edit import batch_edit_pipes, batch_replace_text, update_title_block
+from src.cad_macros import prepare_drawing, full_boq
 from src.agents import (
     supervisor_node, mechanical_agent_node, electrical_agent_node,
     plumbing_agent_node, firefighting_agent_node,
@@ -17,7 +19,14 @@ from src.agents import (
 
 # Tool mới đăng ký ngoài `src/tools.py` để tránh đụng file registry quá lớn khi mở rộng
 # từng skill CAD; ToolNode phải thấy đủ tool để thực thi mọi tool_call từ agent.
-tools = list(_base_tools) + [replace_blocks_by_mapping]
+tools = list(_base_tools) + [
+    replace_blocks_by_mapping,
+    batch_edit_pipes,
+    batch_replace_text,
+    update_title_block,
+    prepare_drawing,
+    full_boq,
+]
 
 # 1. Khởi tạo Graph
 workflow = StateGraph(AgentState)
