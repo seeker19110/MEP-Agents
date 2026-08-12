@@ -4,7 +4,11 @@
 Gửi dữ liệu MEP từ Revit sang FastAPI Cloud để phân tích bằng Bầy đàn AI.
 """
 import json
-import urllib2 # Dùng cho IronPython 2.7.7 trong Revit
+import urllib.request  # Shebang "#! python3" ở trên buộc pyRevit chạy script này bằng
+                        # engine CPython3 (không phải IronPython 2.7.7) -> phải dùng
+                        # urllib.request của Python 3, KHÔNG PHẢI urllib2 (module này
+                        # không tồn tại ở Python 3, từng khiến script lỗi ngay khi chạy
+                        # thật trong Revit dù mọi test offline đều pass).
 from pyrevit import revit, DB, UI, forms
 
 # Cấu hình máy chủ AI
@@ -53,9 +57,10 @@ def main():
     
     # Gửi HTTP POST request sang FastAPI
     try:
-        req = urllib2.Request(API_URL, data=payload, headers={'Content-Type': 'application/json'})
-        response = urllib2.urlopen(req)
-        result_json = json.loads(response.read())
+        req = urllib.request.Request(API_URL, data=payload.encode('utf-8'),
+                                      headers={'Content-Type': 'application/json'})
+        response = urllib.request.urlopen(req)
+        result_json = json.loads(response.read().decode('utf-8'))
         
         # Báo cáo kết quả bằng cửa sổ Revit (bao gồm đường dẫn tải file BOQ Excel thật,
         # nếu server đã lập được — xem build_revit_boq_excel trong src/qs_tools.py)
