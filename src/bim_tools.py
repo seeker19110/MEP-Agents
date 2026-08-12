@@ -44,9 +44,23 @@ DEFAULT_MIN_VERTICAL_CLEARANCE = 150.0
 DEFAULT_LABEL_SEARCH_RADIUS = 2000.0
 
 
+# Tiền tố layer đã CHUẨN HÓA theo quy ước nội bộ (`src/cad_standards.py`, áp dụng bởi
+# `standardize_cad_drawing`): `<HỆ>-<NHÓM>...`. Kiểm tra tiền tố này TRƯỚC bảng từ khóa vì
+# các mã layer chuẩn (VD `M-SAD`, `M-PIPE-REF`, `E-CABLETRAY`, `F-SPRINKLER`) không chắc
+# chứa các từ khóa tiếng Anh/Việt chung chung bên dưới (VD `M-SAD` không có "duct"/"gio"/
+# "hvac") — thiếu bước này khiến bản vẽ ĐÃ chuẩn hóa lại KHÔNG được nhận diện hệ đúng,
+# vô hiệu hóa `detect_clashes`/`check_pipe_connectivity` ngay sau khi vừa chuẩn hóa xong.
+_PREFIX_SYSTEM = {"M": "HVAC", "E": "Điện", "P": "Cấp thoát nước", "F": "PCCC"}
+
+
 def classify_layer_system(layer_name: str) -> str:
     """Suy ra hệ kỹ thuật ('HVAC', 'Điện', ...) từ tên layer; '' nếu không nhận ra."""
     name = (layer_name or "").lower()
+
+    prefix = (layer_name or "").split("-", 1)[0].strip().upper()
+    if prefix in _PREFIX_SYSTEM:
+        return _PREFIX_SYSTEM[prefix]
+
     for system, keywords in SYSTEM_KEYWORDS:
         if any(kw in name for kw in keywords):
             return system
