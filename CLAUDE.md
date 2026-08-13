@@ -24,7 +24,7 @@ Reviewer kiểm duyệt đầu ra.
 - **Ngôn ngữ/Framework:** Python ≥ 3.11, LangGraph + LangChain, Streamlit (UI), FastAPI
   (API), Celery + Redis (task nền), React/Vite (`web/`)
 - **Quản lý phụ thuộc:** `uv` (khoá trong `uv.lock`, nhóm phụ nằm ở `[project.optional-dependencies]`)
-- **Test:** `pytest` — hiện **580 test**, tất cả phải xanh. Có thêm E2E, xem [`docs/E2E.md`](docs/E2E.md)
+- **Test:** `pytest` — hiện **600 test**, tất cả phải xanh. Có thêm E2E, xem [`docs/E2E.md`](docs/E2E.md)
 - **Kiến trúc:** xem [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md) để nắm trạng thái
   hiện tại, [`TECH_DEBT.md`](TECH_DEBT.md) để biết cái gì còn nợ và **vì sao chưa trả**
 
@@ -66,6 +66,7 @@ uv lock --check                                    # Kiểm tra uv.lock có lệ
 │   ├── *_tools.py                          # Tool tính toán từng bộ phận
 │   ├── cad_*.py                            # Đọc/sửa/tối ưu/chuẩn hóa bản vẽ
 │   ├── supervisor_pipeline.py, standards_backend.py  # Điểm nối mở rộng (xem dưới)
+│   ├── mepf_spec.py                        # Module nền — KHÔNG được import module khác
 │   └── api.py, celery_app.py               # API + task nền
 ├── tests/                     # 55 file test
 ├── web/                       # React/Vite

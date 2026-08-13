@@ -17,33 +17,64 @@ import logging
 from functools import lru_cache
 from src.workspace import resolve_safe_path, get_project_root
 from src.cad_revision import create_snapshot
+# Bản đồ mã INSUNITS (DXF group code $INSUNITS) sang tên đơn vị dễ đọc. Dùng chung một
+# nguồn với `src/cad_units.py` để hai chỗ không mô tả cùng một mã bằng hai cái tên khác nhau.
+from src.cad_units import INSUNITS_NAMES as _INSUNITS_NAMES
+from src.cad_block_replace import replace_blocks_by_mapping
+from src.cad_batch_edit import batch_edit_pipes, batch_replace_text, update_title_block
+from src.cad_macros import prepare_drawing, full_boq
+from src.qs_auditor_tools import qs_audit_checklist
+from src.boq_diff import compare_boq
+
+# Tool của từng bộ phận. Trước đây cả khối này bị dồn xuống CUỐI file kèm `# noqa: E402`
+# vì `qs_tools` import ngược lên `tools` — nay hàm dùng chung đã tách sang
+# `src/mepf_spec.py` nên vòng import không còn, khối import về đúng chỗ của nó.
+from src.hvac_tools import (
+    calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
+    calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
+    calc_cooling_tower, calc_fresh_air_ashrae, calc_vrv_outdoor_unit,
+)
+from src.elec_tools import calc_cable_size, calc_breaker_size, calc_lighting_qty
+from src.plumb_tools import (
+    calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
+    calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
+    calc_vent_pipe, calc_grease_trap, calc_sump_pump,
+)
+from src.ff_tools import calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty
+from src.elec_tools import (
+    calc_voltage_drop, calc_total_load, calc_short_circuit,
+    calc_cable_tray_size, calc_lightning_protection,
+    calc_emergency_lighting, calc_power_factor_correction,
+)
+from src.hvac_tools import calc_nc_level
+from src.ff_tools import (
+    calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
+    calc_gas_suppression, calc_fire_water_tank,
+)
+from src.qs_tools import (
+    lookup_unit_price, calc_boq_cost, export_boq_vietnam, auto_quantity_takeoff, calc_support_hangers,
+    build_revit_boq_excel,  # noqa: F401 — re-export cho mã sẵn có; `src/api.py` nay nạp thẳng từ qs_tools
+)
+from src.bim_tools import detect_clashes, read_ifc_model, check_pipe_connectivity
+from src.panel_schedule import generate_panel_schedule
+from src.cad_revision import (
+    snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
+)
+from src.vision_tools import detect_cad_symbols_yolo
 from src import cad_standards
 from src import cad_geometry
 from src import cad_loader
 
 logger = logging.getLogger(__name__)
 
-def normalize_mepf_parameter_spec(text: str) -> str:
-    """Chuẩn hóa toàn bộ các ký hiệu thông số kỹ thuật MEPF trong CAD về định dạng đồng nhất cho AI:
-    1. Đường kính ống: %%c, Φ, Ø, D, d, DN, OD -> Ø110 (D110)
-    2. Kích thước ống gió: 600*400, 600X400, W600xH400 -> 600x400
-    3. Độ dốc thoát nước: i=1%, s=1%, i=1.5% -> i=1%
-    4. Tiết diện dây điện: 3x2.5mm2, 3x2.5sqmm -> 3x2.5mm²
-    5. Điện áp / Pha: 220V/1P, 220V 1 Phase -> 220V-1P
-    6. Lưu lượng: CMH, m3/h -> m³/h
-    """
-    if not text:
-        return text
-    text = text.replace('%%c', 'Ø').replace('%%C', 'Ø').replace('Φ', 'Ø')
-    text = re.sub(r'(?i)\b(Ø|DN|D|d|OD)\s*(\d+)\b', r'Ø\2 (D\2)', text)
-    text = re.sub(r'(?i)(?:W)?(\d+)\s*[\*xX]\s*(?:H)?(\d+)', r'\1x\2', text)
-    text = re.sub(r'(?i)\b[is]\s*=\s*(\d+(?:\.\d+)?)\s*%', r'i=\1%', text)
-    text = re.sub(r'(?i)\b(\d+x\d+(?:\.\d+)?)\s*(?:mm2|sqmm|mm²)\b', r'\1mm²', text)
-    text = re.sub(r'(?i)\b(220|230|380|400)\s*V?\s*[\/\-]?\s*([13])\s*(?:P|Phase|Pha)\b', r'\1V-\2P', text)
-    text = re.sub(r'(?i)\b(?:CMH|m3\/h|m3h)\b', r'm³/h', text)
-    return text
-
-normalize_pipe_diameter_spec = normalize_mepf_parameter_spec
+# Chuẩn hóa ký hiệu thông số MEPF nay nằm ở `src/mepf_spec.py` — module nền không import
+# ngược lại module nào của dự án. Trước đây hàm này định nghĩa ngay tại đây và `qs_tools`
+# import ngược lên, tạo vòng import (xem TECH_DEBT.md mục 12). Vẫn re-export ở đây để mã
+# sẵn có `from src.tools import normalize_mepf_parameter_spec` không phải sửa.
+from src.mepf_spec import (  # noqa: F401
+    normalize_mepf_parameter_spec,
+    normalize_pipe_diameter_spec,
+)
 
 @lru_cache(maxsize=4)
 def _load_vectorstore(api_key: str, index_path: str):
@@ -862,9 +893,6 @@ def analyze_cad_spatial_context(file_path: str, max_distance: float = 2000.0) ->
     except Exception as e:
         return f"Lỗi phân tích ngữ cảnh không gian CAD: {e}"
 
-# Bản đồ mã INSUNITS (DXF group code $INSUNITS) sang tên đơn vị dễ đọc. Dùng chung một
-# nguồn với `src/cad_units.py` để hai chỗ không mô tả cùng một mã bằng hai cái tên khác nhau.
-from src.cad_units import INSUNITS_NAMES as _INSUNITS_NAMES  # noqa: E402
 
 
 @tool
@@ -1554,53 +1582,12 @@ def lookup_equipment_catalog(equipment_type: str, search_kw: str) -> str:
 
 
 
-# Đặt sau các hàm phía trên (không phải đầu file) vì `src.qs_tools` import ngược lại
-# `normalize_mepf_parameter_spec` từ chính module này ở module-level — đặt các import
-# này lên đầu file sẽ tạo vòng import khi `tools` được nạp trước khi các hàm nó cần
-# tồn tại. Xem giải thích tương tự ở `src/api.py`.
-from src.hvac_tools import (  # noqa: E402
-    calc_psychrometrics, calc_duct_size, calc_cooling_load, calc_chw_pipe_size, calc_pump_fan_power, calc_ventilation_rate,
-    calc_cooling_load_detailed, calc_duct_total_pressure_loss, calc_chiller_ahu_selection, calc_refrigerant_pipe_size,
-    calc_cooling_tower, calc_fresh_air_ashrae, calc_vrv_outdoor_unit,
-)
-from src.elec_tools import calc_cable_size, calc_breaker_size, calc_lighting_qty  # noqa: E402
-from src.plumb_tools import (  # noqa: E402
-    calc_water_pipe, calc_water_tank, calc_plumbing_pump_head,
-    calc_drainage_pipe, calc_rainwater_drainage, calc_septic_tank, calc_hot_water_system,
-    calc_vent_pipe, calc_grease_trap, calc_sump_pump,
-)
-from src.ff_tools import calc_sprinkler_qty, calc_fire_pump, calc_extinguisher_qty  # noqa: E402
-from src.elec_tools import (  # noqa: E402
-    calc_voltage_drop, calc_total_load, calc_short_circuit,
-    calc_cable_tray_size, calc_lightning_protection,
-    calc_emergency_lighting, calc_power_factor_correction,
-)
-from src.hvac_tools import calc_nc_level  # noqa: E402
-from src.ff_tools import (  # noqa: E402
-    calc_sprinkler_hydraulics, calc_standpipe, calc_smoke_control, calc_fire_detector_qty,
-    calc_gas_suppression, calc_fire_water_tank,
-)
-from src.qs_tools import (  # noqa: E402
-    lookup_unit_price, calc_boq_cost, export_boq_vietnam, auto_quantity_takeoff, calc_support_hangers,
-    build_revit_boq_excel,  # noqa: F401 — re-export: src/api.py nạp qua đây để tránh vòng import (xem comment ở đó)
-)
-from src.bim_tools import detect_clashes, read_ifc_model, check_pipe_connectivity  # noqa: E402
-from src.panel_schedule import generate_panel_schedule  # noqa: E402
-from src.cad_revision import (  # noqa: E402
-    snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
-)
-from src.vision_tools import detect_cad_symbols_yolo  # noqa: E402
 
 # Skill Phase A/B đã ổn định — đăng ký thẳng vào registry thay vì gắn qua tầng patch lúc
 # import. Tầng patch (`src/cad_phase_a_bind.py`, `src/phase_b_bind.py`) vẫn giữ nguyên và
 # vẫn chạy được, nhưng nay chỉ còn là mạng lưới an toàn: các hàm append đều bỏ qua tool đã
 # có sẵn. Xem TECH_DEBT.md mục 10 về lý do rút dần khỏi kiểu nối bằng patch.
 # `cad_macros` chỉ import `src.tools` bên trong thân hàm nên import ở đây không tạo vòng lặp.
-from src.cad_block_replace import replace_blocks_by_mapping  # noqa: E402
-from src.cad_batch_edit import batch_edit_pipes, batch_replace_text, update_title_block  # noqa: E402
-from src.cad_macros import prepare_drawing, full_boq  # noqa: E402
-from src.qs_auditor_tools import qs_audit_checklist  # noqa: E402
-from src.boq_diff import compare_boq  # noqa: E402
 
 _PHASE_A_CAD_TOOLS = [replace_blocks_by_mapping, batch_edit_pipes, batch_replace_text,
                       update_title_block, prepare_drawing]
