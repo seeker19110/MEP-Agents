@@ -19,7 +19,12 @@ app = Celery(
 
 app.conf.update(
     task_serializer='json',
-    accept_content=['json', 'pickle'],
+    # CHỈ 'json'. Trước đây danh sách này có cả 'pickle': Celery sẽ unpickle bất cứ
+    # message nào đẩy vào broker, mà unpickle dữ liệu không tin cậy là chạy code tùy ý
+    # ngay trong Worker. Redis trong `docker-compose.yml` không đặt mật khẩu, nên ai vào
+    # được mạng nội bộ của Compose là chiếm được Worker. Không chỗ nào trong dự án gửi
+    # task bằng pickle (`task_serializer='json'`), nên bỏ đi không mất tính năng nào.
+    accept_content=['json'],
     result_serializer='json',
     timezone='Asia/Ho_Chi_Minh',
     enable_utc=True,

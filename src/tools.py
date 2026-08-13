@@ -1670,9 +1670,26 @@ TOOLS_BY_ROLE = {
         diff_cad_revisions, list_cad_revisions, convert_dwg_to_dxf, audit_cad_drawing_errors,
         render_cad_image, detect_cad_symbols_yolo,
     ] + _PHASE_B_QS_TOOLS,
+    # QS Auditor CHỈ được kiểm toán, prompt của nó nói rõ "không được phép tính lại từ
+    # đầu". Trước đây vai trò này không có mặt trong bảng nên rơi vào nhánh mặc định và
+    # nhận TOÀN BỘ 90 tool — gồm cả `edit_cad`, `write_cad`, `execute_python_code`. Vừa
+    # trái với nhiệm vụ của nó (kiểm toán viên tự sửa bài mình đang chấm), vừa nhồi
+    # schema của 90 tool vào mỗi request. Bộ dưới đây là đủ để đọc và đối chiếu.
+    "qs_auditor": _COMMON_TOOLS + [
+        read_cad, analyze_cad_spatial_context, lookup_unit_price,
+    ] + _PHASE_B_QS_TOOLS,
 }
+
+#: Bí danh vai trò → khóa trong `TOOLS_BY_ROLE`. `call_mepf_agent` rút tên vai trò từ tên
+#: node ("QSAuditor"), không phải lúc nào cũng trùng khóa viết theo kiểu snake_case.
+ROLE_ALIASES = {
+    "qsauditor": "qs_auditor",
+}
+
 
 def get_tools_for_role(role: str) -> list:
     """Tool set thu gọn cho một vai trò cụ thể; vai trò không xác định (VD: Supervisor
     gọi nhầm) sẽ nhận về toàn bộ `tools` để không bao giờ thiếu tool cần thiết."""
-    return TOOLS_BY_ROLE.get((role or "").lower().strip(), tools)
+    key = (role or "").lower().strip()
+    key = ROLE_ALIASES.get(key, key)
+    return TOOLS_BY_ROLE.get(key, tools)

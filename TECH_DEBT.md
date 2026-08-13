@@ -19,7 +19,9 @@ Trạng thái tổng thể và số liệu hiện hành nằm ở [`docs/TIEN_DO
 | 12 | Vòng lặp import giữa `tools.py` và `qs_tools.py` | 🟢 Thấp | ✅ Đã trả — xem mục 12 |
 | 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm — cần phần cứng thật |
 | 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Chưa làm — cần tài khoản cổng thanh toán thật |
-| 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | ✅ Đã trả — không còn chỗ nào gán đè hàm/tool; xem mục 10 |
+| 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | ⚠️ Trả phần lớn — **còn 3 module vẫn gán đè**; xem mục 10 |
+| 13 | Xác thực JWT chưa từng có hiệu lực (API mở toang ở chế độ JWT) | 🔴 Khẩn cấp | ✅ Đã trả — xem [`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md) mục 1 |
+| 14 | Chưa có quyền sở hữu tài nguyên (ai cũng tải được BOQ của người khác) | 🟠 Cao | Chưa làm — nằm trong việc đa người dùng (mục 6) |
 
 **Không trả được trong lượt này** (mục 1, 2, 6, và phần "chạy thử thật" của mục 3/9): đều
 cần tài nguyên không có sẵn trong môi trường viết code hiện tại — dịch vụ Postgres/S3 thật
@@ -250,11 +252,33 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
     định, fan-out M/E/P/F, duyệt khi đang chờ, duyệt khi không chờ, sau Reviewer đạt/từ
     chối, còn hàng đợi, rỗng) trên bản trước và sau — **kết quả giống hệt từng trường**.
     E2E hạ tầng thật chạy lại cũng đạt.
+- **Đính chính (đợt 5 — rà soát viết lại đặc tả, 2026-08-13):** bảng tổng quan phía trên
+  từng ghi mục này là *"✅ Đã trả — không còn chỗ nào gán đè hàm/tool"*. **Không đúng**, và
+  đây là kiểu sai nguy hiểm nhất trong tài liệu kỹ thuật: người đọc sau tin là đã sạch nên
+  không đi tìm. Tại thời điểm rà soát vẫn còn **bốn** module gán đè lúc import, và một
+  trong số đó đã âm thầm biến thành lỗ hổng bảo mật:
+  - 🔴 `api_phase_c_mount` gán đè `api.require_api_key`. Việc này **chưa từng có tác dụng**
+    — FastAPI chốt `Depends(...)` vào route ngay lúc định nghĩa route, tức là trước khi
+    module này chạy. Hậu quả: bật `JWT_SECRET` mà không đặt `MEP_AGENTS_API_KEY` thì **mọi
+    endpoint mở toang cho khách nặc danh**, trong khi đọc code lại tưởng đã có xác thực.
+    Đã sửa: luật xác thực kép chuyển vào thẳng `src/api.py`, module mount rút còn việc gắn
+    router. Chi tiết + cách kiểm chứng: [`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md)
+    mục 1.
+  - `cad_loader_perf_patch` (gán đè `load_drawing`, `resolve_xref_segments`) — chính module
+    đã sinh ra sự cố XREF, nay có giữ tham chiếu gốc đúng cách nhưng vẫn là patch.
+  - `tools_lazy` (gán đè `get_tools_for_role`) — xem thêm mục 7 của bản rà soát: cache
+    không bao giờ được làm mới.
 - **Còn lại (chưa làm, có chủ đích):**
-  - `agents_perf_patch` (cắt bớt message) và `qs_perf_patch` (cache đơn giá) vẫn là patch
-    lúc import. Đây là bọc thuần túy quanh một hàm, không tráo đối tượng và không phụ
-    thuộc thứ tự với nhau, nên không dính lớp lỗi đã gặp. Để lại có chủ đích: dựng thêm
-    một tầng đăng ký cho hai chỗ này là thêm phức tạp mà không đổi được rủi ro.
+  - `agents_perf_patch` (cắt bớt message), `qs_perf_patch` (cache đơn giá),
+    `cad_loader_perf_patch` (cache DXF) và `tools_lazy` (cache tool theo vai trò) vẫn là
+    patch lúc import. Cả bốn đều là **bọc thuần túy quanh một hàm**, không tráo đối tượng
+    tool và không phụ thuộc thứ tự với nhau — khác hẳn `api_phase_c_mount` vốn cố đổi hành
+    vi một dependency đã bị FastAPI chốt cứng.
+  - Hướng trả đúng: thêm điểm nối thứ tư `register_wrapper(tên, hàm_bọc, ưu tiên)` theo
+    mẫu `supervisor_pipeline`, chuyển cả bốn sang dùng, kèm test khẳng định danh tính hàm
+    không đổi sau import và gọi `clear_role_tools_cache()` khi registry đổi. Không gộp vào
+    PR viết đặc tả: gỡ vội mà không có test đo hiệu năng trước/sau là đúng kiểu thay đổi
+    đã sinh ra sự cố XREF.
   - Bắt buộc chạy `uv run pytest -q` **đủ bộ** trước khi hợp nhất mọi PR, không chỉ test
     của Phase đang làm.
 

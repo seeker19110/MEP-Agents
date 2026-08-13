@@ -41,9 +41,65 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 _API_KEY = os.environ.get("MEP_AGENTS_API_KEY", "").strip()
 
 
-def require_api_key(x_api_key: str = Header(default=""), api_key: str = ""):
-    if _API_KEY and x_api_key != _API_KEY and api_key != _API_KEY:
-        raise HTTPException(status_code=401, detail="Thiếu hoặc sai API Key (header X-API-Key hoặc query ?api_key=).")
+def _jwt_enabled() -> bool:
+    """JWT có được bật không. Gói trong try để thiếu module Phase C thì vẫn chạy được."""
+    try:
+        from src.auth_jwt import jwt_enabled
+        return bool(jwt_enabled())
+    except Exception:
+        return False
+
+
+def require_api_key(
+    x_api_key: str = Header(default=""),
+    api_key: str = "",
+    authorization: str = Header(default=""),
+):
+    """Xác thực kép: `Authorization: Bearer <JWT>` HOẶC `X-API-Key` / `?api_key=`.
+
+    Hàm này CỐ Ý nằm ngay trong `src/api.py` chứ không phải gắn thêm từ module Phase C.
+    FastAPI chốt `Depends(require_api_key)` vào từng route ngay lúc định nghĩa route; gán
+    đè `api.require_api_key` SAU đó (cách `src/api_phase_c_mount.py` từng làm) không đổi
+    được route nào cả — các route vẫn giữ bản hàm cũ chỉ biết API key. Hậu quả thật: bật
+    JWT mà không đặt `MEP_AGENTS_API_KEY` thì mọi endpoint mở toang cho khách nặc danh,
+    trong khi đọc code lại tưởng đã có xác thực. Xem `docs/RA_SOAT_LO_HONG.md` mục 1.
+    """
+    if authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        if _jwt_enabled():
+            from src.auth_jwt import decode_access_token
+            decode_access_token(token)  # ném HTTPException 401 nếu token sai/hết hạn
+            return
+
+    if _API_KEY:
+        if x_api_key == _API_KEY or api_key == _API_KEY:
+            return
+        raise HTTPException(
+            status_code=401,
+            detail="Thiếu hoặc sai xác thực (Bearer JWT hoặc X-API-Key / ?api_key=).",
+        )
+
+    # Không đặt API key nhưng có bật JWT => vẫn phải có Bearer hợp lệ, không được mở cửa.
+    if _jwt_enabled():
+        raise HTTPException(
+            status_code=401,
+            detail="Cần Authorization: Bearer <token> (hoặc đặt MEP_AGENTS_API_KEY).",
+        )
+    # Không đặt gì cả => mở như cũ (dev cục bộ), đúng triết lý graceful fallback.
+
+
+def _ws_authorized(api_key: str = "", token: str = "") -> bool:
+    """Cùng luật với `require_api_key`, nhưng trả bool vì WebSocket không dùng HTTPException."""
+    if token and _jwt_enabled():
+        try:
+            from src.auth_jwt import decode_access_token
+            decode_access_token(token)
+            return True
+        except Exception:
+            return False
+    if _API_KEY:
+        return api_key == _API_KEY
+    return not _jwt_enabled()
 
 
 _SAFE_UPLOAD_EXTENSIONS = {".dwg", ".dxf"}
@@ -57,6 +113,36 @@ def _safe_upload_filename(raw_filename: str) -> str:
         ext = ".dxf"
     name = re.sub(r"[^A-Za-z0-9_.-]", "_", name).strip("._") or uuid.uuid4().hex[:8]
     return f"{name}{ext}"
+
+def _strict_paths_enabled() -> bool:
+    """Bật thì `/api/v1/autocad/analyze` chỉ nhận file NẰM TRONG workspace của server."""
+    return os.environ.get("MEP_AGENTS_STRICT_PATHS", "").strip().lower() in ("1", "true", "yes")
+
+
+def _validate_cad_path(file_path: str) -> tuple[bool, str]:
+    """Kiểm tra đường dẫn bản vẽ do client (plugin AutoCAD) gửi lên.
+
+    Endpoint này nhận đường dẫn TUYỆT ĐỐI trên máy chủ — thiết kế vốn dành cho kịch bản
+    plugin và server chạy cùng máy. Khi server chạy tách biệt, đường dẫn tùy ý biến nó
+    thành công cụ dò file: `os.path.exists` trả lời "có/không" cho mọi đường dẫn khách
+    hàng đoán. Hai lớp chặn:
+
+    1. LUÔN chặn: đuôi file phải là .dwg/.dxf — cắt hẳn việc dò đường dẫn ngoài CAD.
+    2. `MEP_AGENTS_STRICT_PATHS=true`: buộc file nằm trong workspace của server. Mặc định
+       TẮT để không phá kịch bản plugin cùng máy đang chạy được; triển khai nhiều người
+       dùng thì PHẢI bật. Xem `docs/RA_SOAT_LO_HONG.md` mục 4.
+    """
+    ext = os.path.splitext(file_path or "")[1].lower()
+    if ext not in _SAFE_UPLOAD_EXTENSIONS:
+        return False, f"Chỉ nhận bản vẽ .dwg/.dxf, không nhận: {file_path}"
+    if _strict_paths_enabled():
+        from src.workspace import resolve_safe_path
+        try:
+            resolve_safe_path(file_path)
+        except ValueError as e:
+            return False, str(e)
+    return True, ""
+
 
 _WS_POLL_SLEEP = asyncio.sleep
 
@@ -114,8 +200,12 @@ def get_task_status(task_id: str):
 
 
 @app.websocket("/ws/task/{task_id}")
-async def ws_task_status(websocket: WebSocket, task_id: str, api_key: str = ""):
-    if _API_KEY and api_key != _API_KEY:
+async def ws_task_status(websocket: WebSocket, task_id: str, api_key: str = "", token: str = ""):
+    # WebSocket không đặt được header tùy ý khi mở từ trình duyệt, nên xác thực đi qua
+    # query: `?api_key=` (khóa chung) hoặc `?token=` (JWT). Trước đây chỉ chấp nhận
+    # `api_key`, nên khi hệ thống chạy chế độ JWT thì kênh WebSocket hoặc là mở toang
+    # (không đặt API key) hoặc là không có cách nào vào được.
+    if not _ws_authorized(api_key=api_key, token=token):
         await websocket.close(code=1008)
         return
     await websocket.accept()
@@ -174,6 +264,9 @@ def download_revit_boq(filename: str):
 
 @app.post("/api/v1/autocad/analyze", dependencies=[Depends(require_api_key)])
 async def analyze_autocad_model(payload: AutoCADPayload):
+    ok, reason = _validate_cad_path(payload.file_path)
+    if not ok:
+        return {"status": "error", "message": reason}
     if not os.path.exists(payload.file_path):
         return {"status": "error", "message": f"Không tìm thấy file: {payload.file_path}"}
     task = parse_cad_to_db_task.delay(payload.file_path, user_id="cad_client")

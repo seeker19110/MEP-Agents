@@ -4,14 +4,17 @@ Bản ghi nhận trạng thái thực tế của dự án tại mốc rà soát 
 vào (hoặc chính mình sau vài tháng) đọc một file này là biết dự án đang ở đâu, cái gì đã
 chạy được thật, cái gì mới chỉ viết xong mà chưa kiểm chứng.
 
-**Cập nhật lần cuối:** 2026-08-13 — sau đợt rà soát toàn dự án (PR #32).
+**Cập nhật lần cuối:** 2026-08-13 — sau đợt quét sâu viết lại đặc tả. Đặc tả đầy đủ nay
+nằm ở [`DAC_TA_HE_THONG.md`](DAC_TA_HE_THONG.md); lỗ hổng tìm được ở
+[`RA_SOAT_LO_HONG.md`](RA_SOAT_LO_HONG.md) (nặng nhất: xác thực JWT chưa từng có hiệu
+lực — API mở toang ở chế độ JWT, nay đã bịt).
 
 ## 1. Số liệu hiện trạng
 
 | Chỉ số | Giá trị | Ghi chú |
 |---|---:|---|
-| Mã nguồn Python (`src/`) | ~12.660 dòng | 58 module |
-| Test Python | **600 đạt / 0 lỗi** | 57 file trong `tests/` |
+| Mã nguồn Python (`src/`) | ~13.000 dòng | 59 module |
+| Test Python | **617 đạt / 0 lỗi** | 59 file trong `tests/` |
 | Test giao diện | **7 đạt / 0 lỗi** | Playwright, Chromium thật (`web/tests-ui/`) |
 | Số PR đã hợp nhất | 32 | tính tới `c44e3b3` |
 | Phase đã hợp nhất | A, B, C, D | xem mục 2 |
