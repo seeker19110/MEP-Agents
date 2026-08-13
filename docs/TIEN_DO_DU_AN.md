@@ -11,7 +11,8 @@ chạy được thật, cái gì mới chỉ viết xong mà chưa kiểm chứn
 | Chỉ số | Giá trị | Ghi chú |
 |---|---:|---|
 | Mã nguồn Python (`src/`) | ~12.660 dòng | 58 module |
-| Test | **580 đạt / 0 lỗi** | 55 file trong `tests/` |
+| Test Python | **590 đạt / 0 lỗi** | 56 file trong `tests/` |
+| Test giao diện | **7 đạt / 0 lỗi** | Playwright, Chromium thật (`web/tests-ui/`) |
 | Số PR đã hợp nhất | 32 | tính tới `c44e3b3` |
 | Phase đã hợp nhất | A, B, C, D | xem mục 2 |
 
@@ -132,6 +133,20 @@ Sau đợt này **không còn chỗ nào gán đè hàm hay tráo đối tượn
 patch còn lại (`agents_perf_patch`, `qs_perf_patch`) là bọc thuần túy quanh một hàm, không
 dính lớp lỗi đã gặp — để lại có chủ đích.
 
+## 4f. Triển khai theo khuyến nghị (đợt thứ sáu)
+
+- **Test giao diện `web/`** — 7 kịch bản Playwright trên Chromium thật, gồm **trọn đường
+  qua trình duyệt**: thả bản vẽ → bấm phân tích → WebSocket đẩy trạng thái → tải Excel về.
+  Đây là mảng trước đó không có lớp kiểm thử nào. Test bắt ngay một lỗi giao diện thật:
+  vùng kéo-thả mời "hoặc click để chọn file" nhưng **không có `<input type="file">`** — cú
+  bấm rơi vào hư không. Đã sửa, và lời mời nay là nút thật (bàn phím dùng được).
+- **Cảnh báo bảng đơn giá cũ** — rủi ro nghiệp vụ lớn nhất còn lại: con số tiền đi vào hồ
+  sơ thầu dựa trên `data/unit_prices.csv` mà không ai biết bảng giá cũ chưa. Nay có
+  `data/unit_prices.meta.json` khai báo ngày hiệu lực, quá ngưỡng thì chính báo cáo dự
+  toán mang theo cảnh báo. Xem `TECH_DEBT.md` mục 11.
+- **Chưa làm được:** chạy Docker Compose (không có Docker daemon) và dựng Ollama thật
+  (chưa cài). Hai việc này vẫn cần máy khác.
+
 ## 5. Việc còn nợ
 
 Chi tiết đầy đủ ở [`TECH_DEBT.md`](../TECH_DEBT.md). Tóm tắt mức ưu tiên:
@@ -140,7 +155,6 @@ Chi tiết đầy đủ ở [`TECH_DEBT.md`](../TECH_DEBT.md). Tóm tắt mức 
 |---|---|---|
 | Chạy thử `docker compose up --build` thật | 🟠 Cao | Cần máy có Docker daemon |
 | Migrate Postgres/pgvector/S3 với hạ tầng thật | 🟠 Cao | Cần instance thật + người duyệt schema |
-| Test UI cho `web/` (Playwright/Cypress) | 🟡 Vừa | Chưa có kịch bản |
 | Kiểm thử plugin trong Revit/AutoCAD thật | 🟡 Vừa | Cần máy Windows có 2 phần mềm đó |
 | Fine-tune YOLO trên ký hiệu MEPF | 🟡 Vừa | Cần bộ ảnh gán nhãn thật |
 | Real-time đúng nghĩa (Redis Pub/Sub) | 🟡 Vừa | Server vẫn polling Celery backend 1s |
@@ -160,4 +174,5 @@ Xếp theo tỉ lệ lợi ích / công sức, cao xuống thấp:
    lớp container có vấn đề gì.
 2. **Dựng thử cấu hình lai với Ollama thật** — phần sửa địa chỉ server mới chỉ được kiểm ở
    mức "dựng đúng địa chỉ", chưa hề gọi tới server thật.
-3. **Test UI cho `web/`** (Playwright) — mảng duy nhất chưa có lớp kiểm thử nào.
+3. **Đối chiếu `data/unit_prices.csv` với công bố giá thật của Sở Xây dựng**, và phân theo
+   vùng. Cơ chế cảnh báo đã có, nhưng số liệu vẫn là giá tham khảo nội bộ.

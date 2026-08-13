@@ -80,12 +80,43 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:8083/api/v1/takeoff -
 MEP_AGENTS_API_KEY=doi-gia-tri-nay uv run python scripts/e2e_smoke.py
 ```
 
+## Tầng 3 — giao diện Web (Playwright, trình duyệt thật)
+
+```bash
+cd web
+npm install
+npm run test:ui
+```
+
+Chạy trên **bản build tĩnh** (`vite preview` cổng 5173) chứ không phải dev server — đó mới
+là thứ được đóng gói vào container `web`. Biến `VITE_*` là build-time nên hai bản có thể
+khác nhau đúng ở chỗ này. Cần backend đang chạy (xem tầng 2).
+
+Bao 7 kịch bản, trong đó có **trọn đường qua trình duyệt**: thả bản vẽ → bấm phân tích →
+WebSocket đẩy trạng thái → tải file Excel thật về.
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `E2E_API_BASE` | `http://127.0.0.1:8083` | Backend để Web App gọi |
+| `CHROMIUM_PATH` | `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` | Chromium có sẵn; đặt lại nếu máy khác |
+
+**Cổng 5173 không phải chọn bừa:** nó nằm trong danh sách origin mà API cho phép sẵn
+(`_CORS_ORIGINS` trong `src/api.py`). Chạy giao diện ở cổng khác mà quên mở CORS sẽ dẫn tới
+một tình huống dễ chẩn đoán nhầm: **trình duyệt chặn phản hồi trong khi server vẫn xử lý
+xong xuôi** — người dùng thấy "Lỗi tải lên" còn worker thì đã chạy hết cả tác vụ và đã ghi
+file Excel. Nhìn log server thấy `200 OK` mà giao diện báo lỗi thì gần như chắc chắn là CORS.
+
 ## Kết quả đã kiểm chứng
 
 Chạy lần đầu bằng **cách B** (Redis thật, worker Celery chạy tiến trình riêng, FastAPI
 thật) — **đạt**: tải lên → worker nhặt task qua Redis → Excel 5.582 byte → tải về, tổng
 chiều dài khớp đúng hình học đã dựng. Bật `MEP_AGENTS_API_KEY` cũng đạt, và thiếu khóa thì
 bị chặn 401 đúng như thiết kế.
+
+Tầng 3 (giao diện) chạy đủ **7/7** trên Chromium thật, gồm cả trọn đường thả file → phân
+tích → WebSocket → tải Excel. Trong lúc viết, test bắt được một lỗi giao diện thật: vùng
+kéo-thả mời "hoặc click để chọn file" nhưng không hề có `<input type="file">` — cú bấm rơi
+vào hư không, không báo gì. Đã sửa.
 
 **Chưa kiểm chứng:** chạy qua `docker compose up --build` (cách A) — môi trường viết code
 không có Docker daemon. Rất có thể còn lỗi riêng của lớp container (quyền thư mục volume,
