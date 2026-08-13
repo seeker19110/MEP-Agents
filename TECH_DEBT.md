@@ -2,6 +2,8 @@
 
 Tài liệu này ghi nhận các giới hạn kỹ thuật hiện tại của dự án MEP-Agents và định hướng nâng cấp trong các Phase tiếp theo để tiến tới chuẩn Enterprise SaaS.
 
+Trạng thái tổng thể và số liệu hiện hành nằm ở [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md).
+
 ## Tổng quan mức ưu tiên
 
 | # | Mục | Mức độ | Trạng thái |
@@ -15,6 +17,7 @@ Tài liệu này ghi nhận các giới hạn kỹ thuật hiện tại của d�
 | 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | Chưa làm — cần phần mềm/hạ tầng thật |
 | 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm — cần phần cứng thật |
 | 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Chưa làm — cần tài khoản cổng thanh toán thật |
+| 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | Đã lộ 1 lỗi thật (PR #32) — xem mục 10 |
 
 **Không trả được trong lượt này** (mục 1, 2, 6, và phần "chạy thử thật" của mục 3/9): đều
 cần tài nguyên không có sẵn trong môi trường viết code hiện tại — dịch vụ Postgres/S3 thật
@@ -154,7 +157,30 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
   thử.
 - **`docker-compose.yml` mới (mục 3) cũng thuộc nhóm này** — viết xong nhưng chưa chạy
   thật, xem chi tiết ở mục 3.
-- **Chưa có test end-to-end toàn luồng:** test hiện tại (`tests/*.py`, 397 test) đều là
+- **Chưa có test end-to-end toàn luồng:** test hiện tại (`tests/*.py`, 551 test) đều là
   unit/integration test ở mức module Python, mock Celery/Redis. Chưa có kịch bản test
   chạy thật: upload file CAD thật → Celery worker thật (Redis thật) → nhận kết quả Excel
   thật → tải về. Cũng chưa có test UI (Playwright/Cypress) cho `web/`.
+
+## 10. Rủi ro của kiến trúc "patch lúc import" 🟠 Mới ghi nhận (2026-08-13)
+
+- **Tình trạng hiện tại:** cả 4 Phase (A/B/C/D) đều nối vào hệ thống bằng cách vá đè lên
+  module khác lúc import (`src/agents_phase_*_patch.py`, `src/*_bind.py`,
+  `src/cad_loader_perf_patch.py`). Lý do ban đầu hợp lý: giữ `agents.py`/`tools.py` khỏi
+  phình to, mỗi Phase tách bạch và gỡ ra được.
+- **Vấn đề (đã thành sự thật, không còn là giả định):** PR #32 phát hiện `cad_cache` gọi
+  ngược `ezdxf.readfile` trong khi `cad_loader_perf_patch` đã tạm gán chính tên đó thành
+  `readfile_cached` → hàm tự gọi chính mình, đệ quy vô hạn. Hệ quả: **mọi XREF đều thất
+  bại im lặng**, nội dung xref bị loại khỏi khối lượng. Từng module đứng riêng đều đúng;
+  chỉ sai khi ghép — nên test riêng của từng Phase vẫn xanh, chỉ bộ test đầy đủ mới bắt được.
+- **Cùng đợt đó còn 2 lỗi nữa sinh ra từ việc patch ghi đè bản cũ:**
+  `detect_cad_symbols_yolo` mất bước `resolve_safe_path` khi Phase C viết lại, và
+  `ingest.load_standard_docs` mất nhánh xử lý thư mục chưa tồn tại.
+- **Hướng giải quyết:**
+  1. Module bị patch phải giữ tham chiếu hàm gốc **ngay lúc import**, không gọi lại qua
+     tên module (tên đó có thể đã bị người khác thay). Đã áp dụng cho `cad_cache`.
+  2. Rà các patch còn lại tìm cùng kiểu lỗi này.
+  3. Dài hạn: gộp dần các skill đã ổn định vào registry chính (`tools.py`) thay vì giữ
+     mãi ở tầng patch — patch nên là bước quá độ, không phải kiến trúc vĩnh viễn.
+  4. Bắt buộc chạy `uv run pytest -q` **đủ bộ** trước khi hợp nhất mọi PR, không chỉ test
+     của Phase đang làm.
