@@ -24,7 +24,7 @@ Reviewer kiểm duyệt đầu ra.
 - **Ngôn ngữ/Framework:** Python ≥ 3.11, LangGraph + LangChain, Streamlit (UI), FastAPI
   (API), Celery + Redis (task nền), React/Vite (`web/`)
 - **Quản lý phụ thuộc:** `uv` (khoá trong `uv.lock`, nhóm phụ nằm ở `[project.optional-dependencies]`)
-- **Test:** `pytest` — hiện **551 test**, tất cả phải xanh
+- **Test:** `pytest` — hiện **580 test**, tất cả phải xanh. Có thêm E2E, xem [`docs/E2E.md`](docs/E2E.md)
 - **Kiến trúc:** xem [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md) để nắm trạng thái
   hiện tại, [`TECH_DEBT.md`](TECH_DEBT.md) để biết cái gì còn nợ và **vì sao chưa trả**
 
@@ -65,9 +65,9 @@ uv lock --check                                    # Kiểm tra uv.lock có lệ
 │   ├── agents.py, graph.py, state.py       # Lõi LangGraph
 │   ├── *_tools.py                          # Tool tính toán từng bộ phận
 │   ├── cad_*.py                            # Đọc/sửa/tối ưu/chuẩn hóa bản vẽ
-│   ├── *_patch.py, *_bind.py               # Nối các Phase vào hệ thống (xem cảnh báo dưới)
+│   ├── supervisor_pipeline.py, standards_backend.py  # Điểm nối mở rộng (xem dưới)
 │   └── api.py, celery_app.py               # API + task nền
-├── tests/                     # 51 file test
+├── tests/                     # 55 file test
 ├── web/                       # React/Vite
 ├── revit/ · autocad/          # Plugin
 └── docs/                      # Tài liệu
@@ -75,12 +75,21 @@ uv lock --check                                    # Kiểm tra uv.lock có lệ
 
 ## ⚠️ Cảnh báo bắt buộc đọc trước khi sửa code
 
-Các Phase A/B/C/D nối vào hệ thống bằng **patch lúc import** (`src/agents_phase_*_patch.py`,
-`src/*_bind.py`, `src/cad_loader_perf_patch.py`). Kiểu nối này đã sinh ra lỗi thật:
+Các Phase A/B/C/D **từng** nối vào hệ thống bằng patch lúc import (gán đè hàm/tool của
+module khác). Kiểu nối đó đã sinh ra lỗi thật — `cad_cache` tự gọi chính mình gây đệ quy
+vô hạn, mọi XREF bị loại khỏi khối lượng (PR #32) — và nay đã được thay hết bằng **ba điểm
+nối tường minh**. Muốn mở rộng, dùng đúng ba chỗ này, **đừng gán đè module khác**:
 
-- Module bị patch **phải giữ tham chiếu hàm gốc ngay lúc import**, không gọi lại qua tên
-  module — tên đó có thể đã bị patch khác thay, dẫn tới tự gọi chính mình (đã xảy ra ở
-  `cad_cache` → đệ quy vô hạn → mọi XREF bị loại khỏi khối lượng, PR #32).
+| Muốn thêm gì | Dùng |
+|---|---|
+| Tool mới cho một vai trò | `src/tools.py` — `TOOLS_BY_ROLE` + `tools` |
+| Đường tra cứu tiêu chuẩn mới | `src/standards_backend.py` — `register_backend(tên, hàm, ưu tiên)` |
+| Luật định tuyến mới | `src/supervisor_pipeline.py` — `register_middleware(tên, hàm, ưu tiên)` |
+
+Hai quy tắc rút ra, vẫn còn giá trị:
+
+- Nếu buộc phải bọc một hàm, **giữ tham chiếu hàm gốc ngay lúc import**, không gọi lại qua
+  tên module — tên đó có thể đã bị người khác thay.
 - **Luôn chạy đủ bộ test**, không chỉ test của Phase đang làm. Lỗi do ghép module không
   bao giờ lộ ra khi chạy riêng.
 

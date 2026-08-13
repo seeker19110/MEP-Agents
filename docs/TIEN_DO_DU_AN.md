@@ -11,7 +11,7 @@ chạy được thật, cái gì mới chỉ viết xong mà chưa kiểm chứn
 | Chỉ số | Giá trị | Ghi chú |
 |---|---:|---|
 | Mã nguồn Python (`src/`) | ~12.660 dòng | 58 module |
-| Test | **573 đạt / 0 lỗi** | 54 file trong `tests/` |
+| Test | **580 đạt / 0 lỗi** | 55 file trong `tests/` |
 | Số PR đã hợp nhất | 32 | tính tới `c44e3b3` |
 | Phase đã hợp nhất | A, B, C, D | xem mục 2 |
 
@@ -31,9 +31,10 @@ uv run python -m py_compile app.py main.py src/*.py
 | **C** | Postgres/pgvector, S3, JWT, scaffold YOLO MEPF | [`README_PHASE_C.md`](../README_PHASE_C.md) | ⚠️ Code + test đủ, **chưa chạy với hạ tầng thật** |
 | **D** | Tìm kiếm lai (vector + từ khóa RRF), embedding cục bộ, LangGraph `Send` chạy song song M/E/P/F, cache tool theo vai trò | [`README_PHASE_D.md`](../README_PHASE_D.md) | ✅ Có test |
 
-Bốn Phase đều nối vào hệ thống bằng **patch lúc import** (`src/agents_phase_*_patch.py`,
-`src/*_bind.py`) thay vì sửa thẳng `agents.py`/`tools.py`. Ưu điểm: mỗi Phase tách bạch,
-dễ gỡ. Nhược điểm đã thành sự thật một lần — xem mục 4.
+Bốn Phase **từng** nối vào hệ thống bằng patch lúc import (gán đè hàm/tool của module
+khác). Kiểu nối đó đã sinh ra lỗi thật (xem mục 4) và nay đã được thay hết bằng ba điểm
+nối tường minh: registry tool (`src/tools.py`), backend tra cứu
+(`src/standards_backend.py`), middleware điều phối (`src/supervisor_pipeline.py`).
 
 ## 3. Đợt rà soát 2026-08-13 (PR #32)
 
@@ -113,6 +114,23 @@ Thêm hai tầng kiểm thử E2E, xem [`E2E.md`](E2E.md):
 Đây là lần đầu dự án có bằng chứng luồng phân tán chạy thật đầu-cuối. **Vẫn chưa** chạy
 qua `docker compose up --build` — môi trường viết code không có Docker daemon, và lớp
 container còn có thể sinh lỗi riêng (quyền volume, biến môi trường, healthcheck).
+
+## 4e. Gỡ nốt phần patch bọc node (đợt thứ năm)
+
+Đây là phần cuối của mục 10 `TECH_DEBT.md`, trước đó cố ý để lại vì nó nằm giữa luồng
+điều phối.
+
+- **`src/supervisor_pipeline.py`** — điểm nối kiểu middleware. Phase B (chốt chặn HIL +
+  hàng đợi) và Phase D (fan-out song song) đăng ký lớp theo mức ưu tiên thay vì gán đè
+  `agents.supervisor_node`. Hàm điều phối nay giữ nguyên danh tính suốt vòng đời tiến
+  trình, nên `src/graph.py` không còn phải đọc lại nó sau các dòng import patch.
+- **`DELIVERABLE_TOOLS`** khai báo thẳng trong `src/agents.py`.
+- **Kiểm chứng tương đương:** chạy cùng 10 tình huống định tuyến đại diện trên bản trước
+  và sau, kết quả **giống hệt từng trường**. E2E hạ tầng thật chạy lại cũng đạt.
+
+Sau đợt này **không còn chỗ nào gán đè hàm hay tráo đối tượng của module khác.** Hai
+patch còn lại (`agents_perf_patch`, `qs_perf_patch`) là bọc thuần túy quanh một hàm, không
+dính lớp lỗi đã gặp — để lại có chủ đích.
 
 ## 5. Việc còn nợ
 

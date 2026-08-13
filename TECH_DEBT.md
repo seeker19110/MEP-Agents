@@ -17,7 +17,7 @@ Trạng thái tổng thể và số liệu hiện hành nằm ở [`docs/TIEN_DO
 | 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | ✅ E2E đã có và **đã chạy đạt với hạ tầng thật** (Redis + worker rời + FastAPI); Revit/AutoCAD vẫn chưa |
 | 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm — cần phần cứng thật |
 | 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Chưa làm — cần tài khoản cổng thanh toán thật |
-| 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | Đã lộ 1 lỗi thật (PR #32) — xem mục 10 |
+| 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | ✅ Đã trả — không còn chỗ nào gán đè hàm/tool; xem mục 10 |
 
 **Không trả được trong lượt này** (mục 1, 2, 6, và phần "chạy thử thật" của mục 3/9): đều
 cần tài nguyên không có sẵn trong môi trường viết code hiện tại — dịch vụ Postgres/S3 thật
@@ -229,14 +229,27 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
      index** — hybrid mất hẳn nhánh vector mà không có dấu hiệu gì. Nay chỉ chặn khi nguồn
      embedding thực sự là `openai`.
   7. ✅ Xóa `get_tools_for_role_cached()` trong `src/tools_lazy.py` (không ai gọi).
+- **Đã làm (đợt 4 — hết phần bọc node):**
+  8. ✅ **Thêm `src/supervisor_pipeline.py`** — điểm nối kiểu middleware cho node điều
+     phối. Phase B (chốt chặn HIL + hàng đợi đa ý định) và Phase D (fan-out song song) nay
+     **đăng ký lớp** thay vì gán đè `agents.supervisor_node`. Ba chỗ mong manh được gỡ:
+     thứ tự các lớp nằm ở mức ưu tiên chứ không phụ thuộc thứ tự import; hàm
+     `supervisor_node` giữ nguyên danh tính nên `from src.agents import supervisor_node`
+     ở bất kỳ đâu cũng nhận đủ hành vi (`src/graph.py` không còn phải đọc lại
+     `_agents_mod.supervisor_node` sau các dòng import patch); và đăng ký trùng tên thì
+     thay thế chứ không chồng lớp. Một lớp ném lỗi chỉ bị bỏ qua kèm cảnh báo, không làm
+     treo cả phiên làm việc.
+  9. ✅ **`DELIVERABLE_TOOLS` khai báo thẳng trong `src/agents.py`**, không cộng bằng patch
+     nữa. `agents_phase_a_patch` rút xuống còn lớp kiểm tra: thiếu skill thì log cảnh báo
+     thay vì để hệ thống chạy thiếu trong im lặng.
+  - Kiểm chứng tương đương: chạy cùng 10 tình huống định tuyến đại diện (đa ý định, đơn ý
+    định, fan-out M/E/P/F, duyệt khi đang chờ, duyệt khi không chờ, sau Reviewer đạt/từ
+    chối, còn hàng đợi, rỗng) trên bản trước và sau — **kết quả giống hệt từng trường**.
+    E2E hạ tầng thật chạy lại cũng đạt.
 - **Còn lại (chưa làm, có chủ đích):**
-  - **Phần patch bọc node của graph vẫn còn**: `agents_phase_a_patch`/`agents_phase_b_patch`
-    (mở rộng `DELIVERABLE_TOOLS`, bọc `supervisor_node` cho HIL + hàng đợi) và
-    `_patch_supervisor_parallel` của Phase D. Đây là bọc **hành vi của node**, không phải
-    đăng ký tool, nên không dùng được kiểu registry vừa làm. Gỡ chúng đòi tái cấu trúc
-    `agents.py`/`graph.py` thành các bước có điểm nối sẵn (middleware/hook) — việc lớn,
-    nên làm riêng một PR có test bao đủ luồng supervisor trước khi động vào.
   - `agents_perf_patch` (cắt bớt message) và `qs_perf_patch` (cache đơn giá) vẫn là patch
-    lúc import. Rủi ro thấp (bọc thuần túy, không đổi dữ liệu), để lại cũng được.
+    lúc import. Đây là bọc thuần túy quanh một hàm, không tráo đối tượng và không phụ
+    thuộc thứ tự với nhau, nên không dính lớp lỗi đã gặp. Để lại có chủ đích: dựng thêm
+    một tầng đăng ký cho hai chỗ này là thêm phức tạp mà không đổi được rủi ro.
   - Bắt buộc chạy `uv run pytest -q` **đủ bộ** trước khi hợp nhất mọi PR, không chỉ test
     của Phase đang làm.

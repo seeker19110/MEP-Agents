@@ -46,14 +46,25 @@ def _patch_vector_search_hybrid() -> None:
         logger.warning("hybrid search patch skip: %s", e)
 
 
+#: Ưu tiên của lớp Phase D. Cao hơn Phase B nên nằm NGOÀI — giữ đúng thứ tự cũ, khi
+#: Phase D bọc sau Phase B nên ở ngoài cùng.
+PHASE_D_PRIORITY = 20
+
+
 def _patch_supervisor_parallel() -> None:
+    """Đăng ký lớp phát hiện fan-out song song.
+
+    Trước đây gán đè `agents.supervisor_node`; nay đăng ký middleware nên không phụ thuộc
+    thứ tự import và không ai cầm nhầm bản chưa bọc. Xem `src/supervisor_pipeline.py`.
+    """
     import src.agents as agents
     from langchain_core.messages import HumanMessage
+    from src.supervisor_pipeline import register_middleware
+
     if getattr(agents, "_phase_d_parallel_patched", False):
         return
-    _orig = agents.supervisor_node
 
-    def supervisor_node(state):
+    def phase_d_middleware(state, call_next):
         messages = state.get("messages", []) or []
         last = messages[-1] if messages else None
         if isinstance(last, HumanMessage):
@@ -63,7 +74,7 @@ def _patch_supervisor_parallel() -> None:
             workers = detect_parallel_workers(text, done)
             if workers:
                 logger.info("[PM] Parallel fan-out candidates: %s", workers)
-                result = _orig(state)
+                result = call_next(state)
                 if not isinstance(result, dict):
                     result = {}
                 result["parallel_workers"] = workers
@@ -73,11 +84,11 @@ def _patch_supervisor_parallel() -> None:
                 if rest and not result.get("agent_queue"):
                     result["agent_queue"] = rest
                 return result
-        return _orig(state)
+        return call_next(state)
 
-    agents.supervisor_node = supervisor_node
+    register_middleware("phase_d_parallel", phase_d_middleware, priority=PHASE_D_PRIORITY)
     agents._phase_d_parallel_patched = True
-    logger.info("supervisor parallel detection enabled")
+    logger.info("Phase D: đã đăng ký middleware fan-out song song")
 
 
 apply_phase_d()
