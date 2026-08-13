@@ -444,6 +444,8 @@ Một thay đổi vi phạm bất kỳ dòng nào dưới đây thì phải bị
 ## 12. Đọc tiếp
 
 - [`RA_SOAT_LO_HONG.md`](RA_SOAT_LO_HONG.md) — lỗ hổng và thiếu sót tìm được, lộ trình nâng cấp
+- [`DAC_TA_TOOL_AI.md`](DAC_TA_TOOL_AI.md) — đặc tả bổ sung cho tầng công cụ (OCR, PDF,
+  Excel, DWG, AutoCAD, đơn vị, truy vấn dữ liệu): còn thiếu gì và làm theo thứ tự nào
 - [`TIEN_DO_DU_AN.md`](TIEN_DO_DU_AN.md) — trạng thái thực tế, cái gì đã chạy thật
 - [`../TECH_DEBT.md`](../TECH_DEBT.md) — nợ kỹ thuật và **vì sao chưa trả**
 - [`E2E.md`](E2E.md) — kịch bản end-to-end
