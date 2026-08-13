@@ -21,8 +21,11 @@ import src.agents_perf_patch  # noqa: F401
 import src.qs_perf_patch  # noqa: F401
 import src.agents_phase_d_patch  # noqa: F401
 import src.tools_lazy  # noqa: F401
-from src import agents as _agents_mod
-supervisor_node = _agents_mod.supervisor_node
+
+# Trước đây phải đọc lại `_agents_mod.supervisor_node` SAU các dòng import trên, vì Phase
+# B/D gán đè hàm đó lúc import — bản `supervisor_node` lấy ở dòng `from src.agents import`
+# phía trên là bản CHƯA bọc. Nay các Phase đăng ký middleware
+# (`src/supervisor_pipeline.py`) nên hàm giữ nguyên danh tính và không cần đọc lại.
 
 # Skill Phase A/B nay nằm sẵn trong `src.tools` (registry chính), không phải ghép tay ở
 # đây nữa. Vẫn lọc trùng theo tên để nếu về sau có ai thêm lại bằng đường patch thì

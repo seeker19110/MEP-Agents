@@ -416,7 +416,15 @@ class ReviewResponse(BaseModel):
 # Tool nào được coi là "đã tạo ra sản phẩm thật trên đĩa" cho nhiệm vụ bóc khối
 # lượng / dự toán. Dùng để kiểm tra theo CẤU TRÚC (có tool_call hay không) thay cho
 # blacklist chuỗi tiếng Việt cũ — blacklist chỉ cần LLM đổi cách diễn đạt là lọt.
-DELIVERABLE_TOOLS = {"auto_quantity_takeoff", "write_excel", "calc_boq_cost", "write_word", "write_cad", "edit_cad", "replace_blocks_by_mapping"}
+DELIVERABLE_TOOLS = {
+    "auto_quantity_takeoff", "write_excel", "calc_boq_cost", "write_word", "write_cad",
+    "edit_cad", "replace_blocks_by_mapping",
+    # Skill Phase A/B — trước đây được cộng vào bằng patch lúc import, nay khai báo thẳng
+    # ở đây vì bản thân tool đã nằm trong registry chính (`src/tools.py`).
+    "batch_edit_pipes", "batch_replace_text", "update_title_block", "prepare_drawing",
+    "full_boq", "export_boq_vietnam",
+    "qs_audit_checklist", "compare_boq",
+}
 
 # Từ khóa cho biết lượt yêu cầu này ĐÒI HỎI một file sản phẩm, không chỉ tư vấn miệng.
 _DELIVERABLE_INTENT_KEYWORDS = (
@@ -553,7 +561,9 @@ def _supervisor_context(state: AgentState) -> HumanMessage:
     ))
 
 
-def supervisor_node(state: AgentState):
+def _core_supervisor_node(state: AgentState):
+    """Điều phối gốc (hỏi LLM). Các Phase bổ sung luật định tuyến bằng cách đăng ký
+    middleware ở `src/supervisor_pipeline.py`, KHÔNG gán đè hàm này."""
     messages = state.get("messages", [])
     if not messages:
         return {"next": "FINISH"}
@@ -621,3 +631,15 @@ QUY TẮC THÉP (LUẬT PHÊ DUYỆT):
         error_msg = f"Lỗi Giám đốc Dự án ({os.getenv('LLM_PROVIDER', 'openai')}): {str(e)}"
         logger.error("[PM] Lỗi định tuyến: %s", error_msg)
         return {"messages": [AIMessage(content=error_msg, name="ProjectManager")], "next": "FINISH"}
+
+
+def supervisor_node(state: AgentState):
+    """Điểm vào của node điều phối — danh tính hàm này CỐ ĐỊNH suốt vòng đời tiến trình.
+
+    Luật định tuyến bổ sung của các Phase (chốt chặn Human-in-the-loop, hàng đợi đa ý
+    định, fan-out song song) chạy qua chuỗi middleware trong `src/supervisor_pipeline.py`
+    thay vì gán đè hàm này. Nhờ vậy `from src.agents import supervisor_node` ở bất kỳ đâu,
+    vào bất kỳ lúc nào, cũng nhận đúng hành vi đầy đủ.
+    """
+    from src.supervisor_pipeline import run
+    return run(state, _core_supervisor_node)
