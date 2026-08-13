@@ -11,7 +11,7 @@ chạy được thật, cái gì mới chỉ viết xong mà chưa kiểm chứn
 | Chỉ số | Giá trị | Ghi chú |
 |---|---:|---|
 | Mã nguồn Python (`src/`) | ~12.660 dòng | 58 module |
-| Test | **569 đạt / 0 lỗi** | 53 file trong `tests/` |
+| Test | **573 đạt / 0 lỗi** | 54 file trong `tests/` |
 | Số PR đã hợp nhất | 32 | tính tới `c44e3b3` |
 | Phase đã hợp nhất | A, B, C, D | xem mục 2 |
 
@@ -98,6 +98,22 @@ Làm theo đúng 3 việc đề ở mục 6 mà môi trường hiện tại cho 
   không dùng được kiểu registry này — cần tái cấu trúc `agents.py`/`graph.py` thành các
   bước có điểm nối sẵn. Việc lớn, để riêng một PR. Xem `TECH_DEBT.md` mục 10.
 
+## 4d. Kịch bản E2E (đợt thứ tư)
+
+Thêm hai tầng kiểm thử E2E, xem [`E2E.md`](E2E.md):
+
+- **Tầng 1** `tests/test_e2e_takeoff.py` — chạy trong CI, đi trọn đường bản vẽ `.dxf` thật
+  → bóc khối lượng thật → Excel thật → tải về qua FastAPI, chỉ thay broker bằng gọi đồng
+  bộ. Đã kiểm chứng sức bắt lỗi: làm hỏng luồng gộp XREF thì 3/4 test chuyển đỏ.
+- **Tầng 2** `scripts/e2e_smoke.py` — không giả lập gì. **Đã chạy đạt** với Redis thật,
+  worker Celery ở tiến trình riêng, FastAPI thật: tải lên → worker nhặt task qua Redis →
+  Excel 5.582 byte → tải về, tổng chiều dài khớp hình học đã dựng. Đường xác thực
+  `MEP_AGENTS_API_KEY` cũng đã kiểm (thiếu khóa → 401, có khóa → đạt).
+
+Đây là lần đầu dự án có bằng chứng luồng phân tán chạy thật đầu-cuối. **Vẫn chưa** chạy
+qua `docker compose up --build` — môi trường viết code không có Docker daemon, và lớp
+container còn có thể sinh lỗi riêng (quyền volume, biến môi trường, healthcheck).
+
 ## 5. Việc còn nợ
 
 Chi tiết đầy đủ ở [`TECH_DEBT.md`](../TECH_DEBT.md). Tóm tắt mức ưu tiên:
@@ -106,7 +122,7 @@ Chi tiết đầy đủ ở [`TECH_DEBT.md`](../TECH_DEBT.md). Tóm tắt mức 
 |---|---|---|
 | Chạy thử `docker compose up --build` thật | 🟠 Cao | Cần máy có Docker daemon |
 | Migrate Postgres/pgvector/S3 với hạ tầng thật | 🟠 Cao | Cần instance thật + người duyệt schema |
-| Test E2E toàn luồng + test UI cho `web/` | 🟡 Vừa | Chưa có kịch bản; cần Redis/Celery thật |
+| Test UI cho `web/` (Playwright/Cypress) | 🟡 Vừa | Chưa có kịch bản |
 | Kiểm thử plugin trong Revit/AutoCAD thật | 🟡 Vừa | Cần máy Windows có 2 phần mềm đó |
 | Fine-tune YOLO trên ký hiệu MEPF | 🟡 Vừa | Cần bộ ảnh gán nhãn thật |
 | Real-time đúng nghĩa (Redis Pub/Sub) | 🟡 Vừa | Server vẫn polling Celery backend 1s |
@@ -121,9 +137,9 @@ hơn lợi ích.
 
 Xếp theo tỉ lệ lợi ích / công sức, cao xuống thấp:
 
-1. **Chạy thử Docker Compose thật** — rẻ nhất trong nhóm còn nợ, và gỡ được nút thắt cho
-   cả mục E2E lẫn triển khai. Chỉ cần một máy có Docker.
-2. **Một kịch bản E2E tối thiểu** — upload `.dxf` thật → worker thật → tải Excel về. Đủ
-   để bắt lớp lỗi mà unit test có mock không bao giờ thấy.
-3. **Rà lại các patch lúc import còn lại** theo bài học ở mục 4, tìm chỗ nào còn gọi
-   ngược qua tên module đã bị thay.
+1. **Chạy thử Docker Compose thật** — việc còn lại rẻ nhất. Kịch bản E2E đã sẵn sàng:
+   `docker compose up --build -d` rồi `uv run python scripts/e2e_smoke.py` là biết ngay
+   lớp container có vấn đề gì.
+2. **Dựng thử cấu hình lai với Ollama thật** — phần sửa địa chỉ server mới chỉ được kiểm ở
+   mức "dựng đúng địa chỉ", chưa hề gọi tới server thật.
+3. **Test UI cho `web/`** (Playwright) — mảng duy nhất chưa có lớp kiểm thử nào.
