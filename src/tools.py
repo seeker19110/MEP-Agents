@@ -149,6 +149,16 @@ def search_standards(query: str) -> str:
     ngược lại tự động rơi về tra cứu offline theo từ khóa (không cần internet/API key) —
     để tính năng tra cứu tiêu chuẩn vẫn hoạt động khi chạy hoàn toàn offline (VD: Ollama)."""
     logger.info("Tra cứu tiêu chuẩn thực: %s", query)
+    from src.standards_backend import run_search
+    return run_search(query, _legacy_faiss_search)
+
+
+def _legacy_faiss_search(query: str) -> str:
+    """Đường tra cứu gốc: FAISS + OpenAI Embeddings, hỏng thì về tra từ khóa offline.
+
+    Dùng khi chưa có backend nào đăng ký (VD: import thẳng `src.tools` mà không qua
+    `src.graph`) — xem `src/standards_backend.py`.
+    """
     try:
         from src.config import settings
 

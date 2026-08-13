@@ -36,6 +36,19 @@ def use_pgvector() -> bool:
 
 
 def get_embeddings():
+    """Nguồn embedding: OpenAI, Ollama, hoặc sentence-transformers cục bộ.
+
+    Việc chọn nguồn nằm ở `src/local_embeddings.py` và trước đây chỉ được gắn vào bằng
+    patch lúc import Phase D. Hệ quả: ai import thẳng `src.vectorstore` mà không qua
+    `src.graph` — đúng trường hợp của `python -m src.ingest` — vẫn kẹt ở đường OpenAI và
+    không nạp được index nếu thiếu API key. Nay gọi trực tiếp, không phụ thuộc patch.
+    """
+    try:
+        from src.local_embeddings import get_embeddings_auto
+        return get_embeddings_auto()
+    except ImportError:  # pragma: no cover - chỉ khi thiếu module Phase D
+        logger.debug("local_embeddings không sẵn có — dùng đường OpenAI")
+
     from langchain_openai import OpenAIEmbeddings
     s = _settings()
     api_key = s.openai_api_key or os.getenv("OPENAI_API_KEY")

@@ -7,7 +7,9 @@ logger = logging.getLogger(__name__)
 
 
 def apply_phase_d() -> None:
-    _patch_embeddings()
+    # Việc chọn nguồn embedding nay nằm thẳng trong `src/vectorstore.py::get_embeddings`,
+    # không còn gắn bằng patch — nhờ vậy `python -m src.ingest` (không import graph) cũng
+    # dùng được embedding cục bộ. Xem TECH_DEBT.md mục 10.
     _patch_vector_search_hybrid()
     _patch_supervisor_parallel()
     try:
@@ -16,61 +18,30 @@ def apply_phase_d() -> None:
         logger.warning("tools_lazy skip: %s", e)
 
 
-def _patch_embeddings() -> None:
-    try:
-        import src.vectorstore as vs
-        from src.local_embeddings import get_embeddings_auto
-        if getattr(vs, "_local_emb_patched", False):
-            return
-        vs.get_embeddings = lambda: get_embeddings_auto()
-        if hasattr(vs, "_cached_embed_query"):
-            try:
-                vs._cached_embed_query.cache_clear()
-            except Exception:
-                pass
-        vs._local_emb_patched = True
-        logger.info("vectorstore embeddings → auto (openai/ollama/local)")
-    except Exception as e:
-        logger.warning("local embeddings patch skip: %s", e)
-
-
 def _patch_vector_search_hybrid() -> None:
+    """Đăng ký đường tra cứu lai (vector + từ khóa RRF) làm backend ưu tiên cao nhất.
+
+    Trước đây hàm này tạo tool `search_standards` mới rồi tráo vào 4 chỗ trong `tools.py`.
+    Nay chỉ đăng ký một hàm — đối tượng tool giữ nguyên danh tính. Xem
+    `src/standards_backend.py` và TECH_DEBT.md mục 10.
+    """
     try:
         import src.tools as tools_mod
-        from langchain_core.tools import tool
         from src.hybrid_search import hybrid_search_standards, format_hybrid_results
+        from src.standards_backend import register_backend
+
         if getattr(tools_mod, "_hybrid_patched", False):
             return
-        offline = tools_mod._offline_keyword_search
 
-        @tool
-        def search_standards(query: str) -> str:
-            """Tra cứu tiêu chuẩn MEPF (hybrid: vector + từ khóa TCVN)."""
-            logger.info("Hybrid search_standards: %s", query)
-            try:
-                hits = hybrid_search_standards(query, k=4)
-                if hits:
-                    return format_hybrid_results(query, hits)
-            except Exception as e:
-                logger.warning("hybrid failed (%s) — offline", e)
-            return offline(query)
+        def hybrid_backend(query: str) -> str:
+            hits = hybrid_search_standards(query, k=4)
+            if not hits:
+                return ""
+            return format_hybrid_results(query, hits)
 
-        old = tools_mod.search_standards
-        tools_mod.search_standards = search_standards
-
-        def _swap(seq):
-            if not seq:
-                return seq
-            return [search_standards if t is old or getattr(t, "name", None) == "search_standards" else t for t in seq]
-
-        if hasattr(tools_mod, "tools"):
-            tools_mod.tools = _swap(list(tools_mod.tools))
-        if hasattr(tools_mod, "_COMMON_TOOLS"):
-            tools_mod._COMMON_TOOLS = _swap(list(tools_mod._COMMON_TOOLS))
-        if hasattr(tools_mod, "TOOLS_BY_ROLE"):
-            tools_mod.TOOLS_BY_ROLE = {r: _swap(list(ts)) for r, ts in tools_mod.TOOLS_BY_ROLE.items()}
+        register_backend("hybrid", hybrid_backend, priority=20)
         tools_mod._hybrid_patched = True
-        logger.info("search_standards → hybrid")
+        logger.info("search_standards: đã đăng ký backend hybrid")
     except Exception as e:
         logger.warning("hybrid search patch skip: %s", e)
 

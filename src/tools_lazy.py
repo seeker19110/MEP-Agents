@@ -10,19 +10,6 @@ _LOCK = threading.Lock()
 _ROLE_CACHE: dict[str, list] = {}
 
 
-def get_tools_for_role_cached(role: str) -> list:
-    key = (role or "").lower().strip()
-    with _LOCK:
-        hit = _ROLE_CACHE.get(key)
-        if hit is not None:
-            return list(hit)
-    from src.tools import get_tools_for_role
-    tools = list(get_tools_for_role(key))
-    with _LOCK:
-        _ROLE_CACHE[key] = tools
-    return list(tools)
-
-
 def clear_role_tools_cache() -> None:
     with _LOCK:
         _ROLE_CACHE.clear()

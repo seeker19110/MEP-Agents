@@ -11,7 +11,7 @@ chạy được thật, cái gì mới chỉ viết xong mà chưa kiểm chứn
 | Chỉ số | Giá trị | Ghi chú |
 |---|---:|---|
 | Mã nguồn Python (`src/`) | ~12.660 dòng | 58 module |
-| Test | **557 đạt / 0 lỗi** | 52 file trong `tests/` |
+| Test | **569 đạt / 0 lỗi** | 53 file trong `tests/` |
 | Số PR đã hợp nhất | 32 | tính tới `c44e3b3` |
 | Phase đã hợp nhất | A, B, C, D | xem mục 2 |
 
@@ -78,6 +78,25 @@ Làm theo đúng 3 việc đề ở mục 6 mà môi trường hiện tại cho 
 - **Gộp 8 skill Phase A/B vào registry chính** `src/tools.py`. Tầng patch giữ lại làm mạng
   lưới an toàn. Bộ tool từng vai trò không đổi (đã đối chiếu số lượng trước/sau).
 - **Chạy thử Docker / E2E**: vẫn chưa làm được — môi trường này không có Docker daemon.
+
+## 4c. Đợt xử lý thứ ba
+
+- **Thêm điểm mở rộng `src/standards_backend.py`** — Phase C/D thôi tráo đối tượng tool
+  `search_standards`, chuyển sang đăng ký backend theo mức ưu tiên. Tool giữ nguyên danh
+  tính suốt vòng đời tiến trình.
+- **Nguồn embedding vào thẳng `vectorstore.get_embeddings`** — sửa kèm một lỗi thật:
+  `python -m src.ingest` không import `graph` nên patch Phase D không chạy, cộng với việc
+  `ingest` chặn cứng ở `OPENAI_API_KEY` → **chạy offline không nạp được index**, hybrid
+  mất hẳn nhánh vector mà không có dấu hiệu gì.
+- **Xóa hàm chết** `get_tools_for_role_cached()`.
+- **Sửa hardcode địa chỉ LLM cục bộ** — `src/agents.py` hardcode `localhost:11434`
+  (Ollama) và `localhost:8000` (vLLM), trong khi phía embedding lại đọc `OLLAMA_BASE_URL`.
+  Hai nửa của cùng một cấu hình đi hai đường: embedding trỏ đúng máy, LLM gọi vào chính
+  container của nó. Chỉ lộ ra khi thật sự dựng cấu hình lai. Nay đọc env, dùng chung biến
+  với embedding, tự chuẩn hóa đuôi `/v1`.
+- **Ghi nợ, chưa làm:** phần patch bọc node của graph (HIL, hàng đợi, fan-out song song)
+  không dùng được kiểu registry này — cần tái cấu trúc `agents.py`/`graph.py` thành các
+  bước có điểm nối sẵn. Việc lớn, để riêng một PR. Xem `TECH_DEBT.md` mục 10.
 
 ## 5. Việc còn nợ
 
