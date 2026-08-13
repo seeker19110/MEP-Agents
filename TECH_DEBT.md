@@ -14,7 +14,7 @@ Trạng thái tổng thể và số liệu hiện hành nằm ở [`docs/TIEN_DO
 | 4 | Real-time (WebSocket) | 🟡 Trung bình | Đã làm 1 phần |
 | 8 | Plugin/Web hardcode địa chỉ server | 🟡 Trung bình | ✅ Đã trả (Revit/AutoCAD/Web đều hết hardcode) |
 | 5 | Computer Vision (YOLO cho bản vẽ rác) | 🟡 Trung bình | Đã làm 1 phần — cần dữ liệu gán nhãn thật |
-| 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | Chưa làm — cần phần mềm/hạ tầng thật |
+| 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | ✅ E2E đã có và **đã chạy đạt với hạ tầng thật** (Redis + worker rời + FastAPI); Revit/AutoCAD vẫn chưa |
 | 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm — cần phần cứng thật |
 | 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Chưa làm — cần tài khoản cổng thanh toán thật |
 | 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | Đã lộ 1 lỗi thật (PR #32) — xem mục 10 |
@@ -166,7 +166,15 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
   thử.
 - **`docker-compose.yml` mới (mục 3) cũng thuộc nhóm này** — viết xong nhưng chưa chạy
   thật, xem chi tiết ở mục 3.
-- **Chưa có test end-to-end toàn luồng:** test hiện tại (`tests/*.py`, 551 test) đều là
+- **✅ ĐÃ CÓ test end-to-end** (bổ sung 2026-08-13): hai tầng, xem [`docs/E2E.md`](docs/E2E.md).
+  Tầng 1 (`tests/test_e2e_takeoff.py`, chạy trong CI) đi trọn đường bản vẽ → khối lượng →
+  Excel thật → tải về, chỉ thay broker bằng gọi đồng bộ. Tầng 2 (`scripts/e2e_smoke.py`)
+  không giả lập gì: **đã chạy đạt** với Redis thật, worker Celery ở tiến trình riêng và
+  FastAPI thật — tải lên → worker nhặt task qua Redis → Excel 5.582 byte → tải về, tổng
+  chiều dài khớp hình học. Đường xác thực `MEP_AGENTS_API_KEY` cũng đã kiểm (thiếu khóa →
+  401, có khóa → đạt). **Vẫn chưa chạy qua `docker compose up --build`** — xem mục 3.
+  Chưa có test UI (Playwright/Cypress) cho `web/`.
+- **Bối cảnh cũ:** test hiện tại (`tests/*.py`, 551 test) đều là
   unit/integration test ở mức module Python, mock Celery/Redis. Chưa có kịch bản test
   chạy thật: upload file CAD thật → Celery worker thật (Redis thật) → nhận kết quả Excel
   thật → tải về. Cũng chưa có test UI (Playwright/Cypress) cho `web/`.

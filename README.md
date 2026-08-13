@@ -182,6 +182,7 @@ Toàn bộ "suy nghĩ", thời gian thực thi và lỗi của từng tác nhân
   [`README_PHASE_B.md`](README_PHASE_B.md) (workflow, HIL),
   [`README_PHASE_C.md`](README_PHASE_C.md) (Postgres/S3/JWT),
   [`README_PHASE_D.md`](README_PHASE_D.md) (tìm kiếm lai, song song hóa).
+- [`docs/E2E.md`](docs/E2E.md) — kiểm thử end-to-end: tầng chạy trong CI và tầng chạy với hạ tầng thật (Redis + worker + API).
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — Docker, docker-compose kèm Ollama, systemd VPS, Streamlit Cloud.
 - [`MEPF_BACKLOG.md`](MEPF_BACKLOG.md) — lịch sử backlog tính năng (đã xử lý hết) và tool tương ứng.
 - [`docs/AUDIT_BOC_KHOI_LUONG.md`](docs/AUDIT_BOC_KHOI_LUONG.md) — hồ sơ rà soát sai lệch bản vẽ → khối lượng: 19 nguồn đã xử lý, chỗ đã rà sạch, chỗ cố ý không sửa, kiểm kê hằng số.
