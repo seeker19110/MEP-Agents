@@ -7,11 +7,6 @@ from langgraph.prebuilt import ToolNode
 from src.state import AgentState
 from src.config import settings
 from src.tools import tools as _base_tools
-from src.cad_block_replace import replace_blocks_by_mapping
-from src.cad_batch_edit import batch_edit_pipes, batch_replace_text, update_title_block
-from src.cad_macros import prepare_drawing, full_boq
-from src.qs_auditor_tools import qs_audit_checklist
-from src.boq_diff import compare_boq
 from src.agents import (
     supervisor_node, mechanical_agent_node, electrical_agent_node,
     plumbing_agent_node, firefighting_agent_node,
@@ -29,16 +24,17 @@ import src.tools_lazy  # noqa: F401
 from src import agents as _agents_mod
 supervisor_node = _agents_mod.supervisor_node
 
-tools = list(_base_tools) + [
-    replace_blocks_by_mapping,
-    batch_edit_pipes,
-    batch_replace_text,
-    update_title_block,
-    prepare_drawing,
-    full_boq,
-    qs_audit_checklist,
-    compare_boq,
-]
+# Skill Phase A/B nay nằm sẵn trong `src.tools` (registry chính), không phải ghép tay ở
+# đây nữa. Vẫn lọc trùng theo tên để nếu về sau có ai thêm lại bằng đường patch thì
+# ToolNode không nhận hai tool cùng tên.
+_seen = set()
+tools = []
+for _t in _base_tools:
+    _name = getattr(_t, "name", None)
+    if _name in _seen:
+        continue
+    _seen.add(_name)
+    tools.append(_t)
 
 workflow = StateGraph(AgentState)
 

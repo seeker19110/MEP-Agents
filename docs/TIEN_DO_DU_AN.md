@@ -11,7 +11,7 @@ chạy được thật, cái gì mới chỉ viết xong mà chưa kiểm chứn
 | Chỉ số | Giá trị | Ghi chú |
 |---|---:|---|
 | Mã nguồn Python (`src/`) | ~12.660 dòng | 58 module |
-| Test | **551 đạt / 0 lỗi** | 51 file trong `tests/` |
+| Test | **557 đạt / 0 lỗi** | 52 file trong `tests/` |
 | Số PR đã hợp nhất | 32 | tính tới `c44e3b3` |
 | Phase đã hợp nhất | A, B, C, D | xem mục 2 |
 
@@ -65,6 +65,19 @@ Hệ quả cho cách làm việc về sau:
    module (tên đó có thể đã bị người khác thay).
 3. Khi một Phase đổi hành vi có chủ đích, sửa luôn test cũ trong cùng PR — đừng để test
    đỏ tồn tại như "nhiễu nền", vì lỗi thật sẽ lẫn vào đó (đúng như đã xảy ra ở đây).
+
+## 4b. Đợt xử lý tiếp theo (cùng ngày)
+
+Làm theo đúng 3 việc đề ở mục 6 mà môi trường hiện tại cho phép:
+
+- **Rà hết tầng patch còn lại** — không có ca đệ quy thứ hai. Nhưng lộ ra một lỗi khác
+  cùng gốc: `cad_loader_perf_patch` gán đè biến toàn cục `ezdxf.readfile` quanh mỗi lần
+  gộp xref. Phase D chạy song song bằng thread nên hai lời gọi chồng nhau khôi phục nhầm
+  của nhau → `ezdxf.readfile` kẹt vĩnh viễn ở bản cache, mọi chỗ đọc DXF sau đó dùng chung
+  một doc có thể bị sửa đổi. Đã sửa bằng cách truyền hàm đọc qua tham số.
+- **Gộp 8 skill Phase A/B vào registry chính** `src/tools.py`. Tầng patch giữ lại làm mạng
+  lưới an toàn. Bộ tool từng vai trò không đổi (đã đối chiếu số lượng trước/sau).
+- **Chạy thử Docker / E2E**: vẫn chưa làm được — môi trường này không có Docker daemon.
 
 ## 5. Việc còn nợ
 

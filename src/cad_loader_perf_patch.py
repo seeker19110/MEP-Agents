@@ -35,14 +35,12 @@ def apply_cad_loader_perf_patch() -> None:
     loader.load_drawing = load_drawing
     _orig_resolve = loader.resolve_xref_segments
 
-    def resolve_xref_segments(doc, base_dir: str, collect_segments_fn):
-        import ezdxf
-        _orig_read = ezdxf.readfile
-        ezdxf.readfile = readfile_cached
-        try:
-            return _orig_resolve(doc, base_dir, collect_segments_fn)
-        finally:
-            ezdxf.readfile = _orig_read
+    def resolve_xref_segments(doc, base_dir: str, collect_segments_fn, readfile=None):
+        # Truyền hàm đọc có cache qua tham số. TUYỆT ĐỐI không gán đè `ezdxf.readfile`
+        # ở đây: Phase D chạy các bộ phận song song bằng thread, hai lời gọi chồng nhau
+        # sẽ khôi phục nhầm biến toàn cục của nhau và làm `ezdxf.readfile` kẹt vĩnh viễn
+        # ở bản cache — mọi chỗ đọc DXF sau đó nhận về doc dùng chung có thể bị sửa đổi.
+        return _orig_resolve(doc, base_dir, collect_segments_fn, readfile or readfile_cached)
 
     loader.resolve_xref_segments = resolve_xref_segments
     loader._perf_patched = True

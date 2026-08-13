@@ -138,13 +138,18 @@ def _transform_point(point, insert, xscale, yscale, rotation_deg):
     return (x + insert[0], y + insert[1], z + (insert[2] if len(insert) > 2 else 0.0))
 
 
-def resolve_xref_segments(doc, base_dir: str, collect_segments_fn):
+def resolve_xref_segments(doc, base_dir: str, collect_segments_fn, readfile=None):
     """Đo chiều dài các tuyến nằm TRONG xref, quy về tọa độ bản vẽ chính.
 
     Trả về `(segments, notes)`. Xref không tìm thấy file đi kèm sẽ được nêu tên trong
     `notes` — người dùng phải biết bản vẽ còn thiếu phần nào, thay vì nhận một con số
     khối lượng thiếu mà tưởng là đủ.
+
+    `readfile` cho phép truyền hàm đọc DXF khác (VD bản có cache). Truyền tham số như
+    thế này thay vì gán đè `ezdxf.readfile` là cố ý: gán đè biến toàn cục không an toàn
+    khi chạy nhiều luồng — hai lời gọi chồng nhau sẽ khôi phục nhầm của nhau.
     """
+    read = readfile or ezdxf.readfile
     segments, notes = [], []
     xref_defs = {name: path for name, path in list_xrefs(doc)}
     if not xref_defs:
@@ -170,7 +175,7 @@ def resolve_xref_segments(doc, base_dir: str, collect_segments_fn):
             continue
 
         try:
-            xdoc = ezdxf.readfile(found)
+            xdoc = read(found)
         except Exception as exc:
             notes.append(f"Không đọc được XREF '{os.path.basename(found)}': {exc}")
             continue

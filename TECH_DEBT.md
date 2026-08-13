@@ -176,11 +176,34 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
 - **Cùng đợt đó còn 2 lỗi nữa sinh ra từ việc patch ghi đè bản cũ:**
   `detect_cad_symbols_yolo` mất bước `resolve_safe_path` khi Phase C viết lại, và
   `ingest.load_standard_docs` mất nhánh xử lý thư mục chưa tồn tại.
-- **Hướng giải quyết:**
-  1. Module bị patch phải giữ tham chiếu hàm gốc **ngay lúc import**, không gọi lại qua
-     tên module (tên đó có thể đã bị người khác thay). Đã áp dụng cho `cad_cache`.
-  2. Rà các patch còn lại tìm cùng kiểu lỗi này.
-  3. Dài hạn: gộp dần các skill đã ổn định vào registry chính (`tools.py`) thay vì giữ
-     mãi ở tầng patch — patch nên là bước quá độ, không phải kiến trúc vĩnh viễn.
-  4. Bắt buộc chạy `uv run pytest -q` **đủ bộ** trước khi hợp nhất mọi PR, không chỉ test
-     của Phase đang làm.
+- **Đã làm (đợt 2, sau khi rà lại toàn bộ tầng patch):**
+  1. ✅ Module bị patch giữ tham chiếu hàm gốc **ngay lúc import** — đã áp dụng cho
+     `cad_cache`.
+  2. ✅ **Rà hết các patch còn lại** (`agents_perf_patch`, `qs_perf_patch`,
+     `vector_search_bind`, `tools_lazy`, `agents_phase_d_patch`) tìm cùng kiểu lỗi:
+     **không có ca đệ quy thứ hai**. Các chỗ gọi qua `cad_loader.load_drawing`,
+     `vectorstore.get_embeddings` là cố ý và patch ăn đúng.
+  3. ✅ **Nhưng phát hiện một lỗi khác cùng gốc:** `cad_loader_perf_patch` gán đè biến
+     toàn cục `ezdxf.readfile` suốt lời gọi gộp xref rồi khôi phục trong `finally`. Phase
+     D chạy các bộ phận song song bằng thread, nên hai lời gọi chồng nhau sẽ khôi phục
+     nhầm của nhau và làm `ezdxf.readfile` **kẹt vĩnh viễn ở bản cache** — mọi chỗ đọc DXF
+     sau đó nhận về cùng một doc dùng chung, ai sửa doc là hỏng dữ liệu của người khác.
+     Nay `resolve_xref_segments` nhận hàm đọc qua **tham số**, không đụng biến toàn cục.
+     Có test khóa bất biến này (`tests/test_perf_global.py`).
+  4. ✅ **Gộp 8 skill Phase A/B vào registry chính** (`src/tools.py`): `TOOLS_BY_ROLE` và
+     danh sách `tools` nay chứa sẵn `replace_blocks_by_mapping`, `batch_edit_pipes`,
+     `batch_replace_text`, `update_title_block`, `prepare_drawing`, `full_boq`,
+     `qs_audit_checklist`, `compare_boq`. Tầng patch vẫn còn và vẫn chạy, nhưng chỉ còn là
+     mạng lưới an toàn (các hàm append đều bỏ qua tool đã có). `src/graph.py` không phải
+     ghép tay danh sách nữa. Bộ tool của mọi vai trò **không đổi** — đã đối chiếu số lượng
+     trước/sau và kiểm tra không có tool trùng tên
+     (`tests/test_registry_consolidation.py`).
+- **Còn lại:**
+  - Gộp nốt phần Phase C/D vào registry — khó hơn vì chúng thay thế hành vi
+    (`search_standards` bản hybrid, nguồn embedding) chứ không chỉ thêm tool. Cần thiết kế
+    điểm mở rộng đàng hoàng thay vì swap module attribute.
+  - `src/tools_lazy.py` có `get_tools_for_role_cached()` **không ai gọi** (trùng chức năng
+    với bản patch `patch_get_tools_for_role`), chỉ còn test của chính nó. Nên xóa khi đụng
+    tới file này lần sau.
+  - Bắt buộc chạy `uv run pytest -q` **đủ bộ** trước khi hợp nhất mọi PR, không chỉ test
+    của Phase đang làm.
