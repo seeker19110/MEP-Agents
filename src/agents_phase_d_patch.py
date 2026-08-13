@@ -10,12 +10,10 @@ def apply_phase_d() -> None:
     # Việc chọn nguồn embedding nay nằm thẳng trong `src/vectorstore.py::get_embeddings`,
     # không còn gắn bằng patch — nhờ vậy `python -m src.ingest` (không import graph) cũng
     # dùng được embedding cục bộ. Xem TECH_DEBT.md mục 10.
+    # Cache tool theo vai trò nay nằm thẳng trong `src/tools.py::get_tools_for_role`
+    # (module `tools_lazy` đã xóa), nên không phải nạp thêm gì ở đây nữa.
     _patch_vector_search_hybrid()
     _patch_supervisor_parallel()
-    try:
-        import src.tools_lazy  # noqa: F401
-    except Exception as e:
-        logger.warning("tools_lazy skip: %s", e)
 
 
 def _patch_vector_search_hybrid() -> None:

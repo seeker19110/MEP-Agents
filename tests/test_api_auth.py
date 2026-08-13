@@ -20,6 +20,22 @@ def client(monkeypatch):
     return TestClient(api.app)
 
 
+@pytest.fixture
+def jwt_on(monkeypatch):
+    """Bật JWT một cách KHÔNG phụ thuộc thứ tự import.
+
+    `src.config.settings` chụp lại biến môi trường đúng MỘT lần, lúc `src.config` được
+    import lần đầu. Test nào `monkeypatch.setenv("JWT_SECRET", ...)` trước thời điểm đó
+    sẽ khiến `settings.jwt_secret` dính giá trị test **suốt cả phiên pytest** — các test
+    sau tưởng JWT đang tắt nhưng thực ra đang bật, và hỏng theo kiểu rất khó lần ra.
+    Đặt thẳng thuộc tính thì `monkeypatch` hoàn nguyên được, không phụ thuộc thứ tự.
+    """
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "jwt_secret", "unit-test-secret")
+    return "unit-test-secret"
+
+
 def _revit_call(client, **kwargs):
     return client.post(
         "/api/v1/revit/analyze",
@@ -60,20 +76,18 @@ def test_api_key_mode_accepts_header_and_query(client, monkeypatch):
 
 # --- Chế độ JWT (đây là chỗ từng mở toang) ---
 
-def test_jwt_only_mode_rejects_anonymous(client, monkeypatch):
+def test_jwt_only_mode_rejects_anonymous(client, monkeypatch, jwt_on):
     """Bật JWT, KHÔNG đặt API key: request nặc danh phải bị chặn.
 
     Đây chính là lỗ hổng cũ — route giữ bản `require_api_key` chỉ biết API key, mà API
     key lại rỗng, nên mọi endpoint trả 200 cho bất kỳ ai.
     """
     monkeypatch.setattr(api, "_API_KEY", "")
-    monkeypatch.setenv("JWT_SECRET", "unit-test-secret")
     assert _revit_call(client).status_code == 401
 
 
-def test_jwt_only_mode_accepts_valid_bearer(client, monkeypatch):
+def test_jwt_only_mode_accepts_valid_bearer(client, monkeypatch, jwt_on):
     monkeypatch.setattr(api, "_API_KEY", "")
-    monkeypatch.setenv("JWT_SECRET", "unit-test-secret")
     from src.auth_jwt import create_access_token
 
     token = create_access_token("boss")
@@ -81,27 +95,24 @@ def test_jwt_only_mode_accepts_valid_bearer(client, monkeypatch):
     assert resp.status_code == 200
 
 
-def test_jwt_mode_rejects_forged_bearer(client, monkeypatch):
+def test_jwt_mode_rejects_forged_bearer(client, monkeypatch, jwt_on):
     monkeypatch.setattr(api, "_API_KEY", "")
-    monkeypatch.setenv("JWT_SECRET", "unit-test-secret")
     resp = _revit_call(client, headers={"Authorization": "Bearer not.a.token"})
     assert resp.status_code == 401
 
 
-def test_api_key_still_works_when_jwt_enabled(client, monkeypatch):
+def test_api_key_still_works_when_jwt_enabled(client, monkeypatch, jwt_on):
     """Hai cách xác thực phải song song được — plugin cũ chỉ biết gửi X-API-Key."""
     monkeypatch.setattr(api, "_API_KEY", "s3cret")
-    monkeypatch.setenv("JWT_SECRET", "unit-test-secret")
     assert _revit_call(client, headers={"X-API-Key": "s3cret"}).status_code == 200
 
 
-def test_auth_login_router_is_mounted(client, monkeypatch):
+def test_auth_login_router_is_mounted(client, monkeypatch, jwt_on):
     """Router `/api/v1/auth` là việc DUY NHẤT `api_phase_c_mount` còn làm — phải còn.
 
     Kiểm bằng request thật chứ không duyệt `app.routes`: bản FastAPI hiện tại gắn router
     theo kiểu trì hoãn (`_IncludedRouter`), duyệt danh sách route sẽ không thấy đường dẫn.
     """
-    monkeypatch.setenv("JWT_SECRET", "unit-test-secret")
     monkeypatch.setenv("JWT_BOOTSTRAP_USER", "boss")
     monkeypatch.setenv("JWT_BOOTSTRAP_PASSWORD", "p@ss")
 
@@ -119,15 +130,13 @@ def test_auth_login_router_is_mounted(client, monkeypatch):
 
 # --- WebSocket ---
 
-def test_websocket_rejects_anonymous_in_jwt_mode(monkeypatch):
+def test_websocket_rejects_anonymous_in_jwt_mode(monkeypatch, jwt_on):
     monkeypatch.setattr(api, "_API_KEY", "")
-    monkeypatch.setenv("JWT_SECRET", "unit-test-secret")
     assert api._ws_authorized(api_key="", token="") is False
 
 
-def test_websocket_accepts_jwt_token_query(monkeypatch):
+def test_websocket_accepts_jwt_token_query(monkeypatch, jwt_on):
     monkeypatch.setattr(api, "_API_KEY", "")
-    monkeypatch.setenv("JWT_SECRET", "unit-test-secret")
     from src.auth_jwt import create_access_token
 
     assert api._ws_authorized(token=create_access_token("boss")) is True

@@ -31,6 +31,24 @@ app.conf.update(
     worker_concurrency=4,  # Default concurrency, can be overridden by worker startup
 )
 
+def _publish_event(task, payload: dict) -> None:
+    """Đẩy sự kiện tiến độ lên kênh Pub/Sub để WebSocket nhận ngay.
+
+    Best-effort tuyệt đối: không có Redis, không có request thật (chạy `.run()` trong
+    test), hay kênh gián đoạn đều bỏ qua trong im lặng — client vẫn nhận đúng trạng thái
+    qua đường polling dự phòng, chỉ chậm hơn. Sự cố ở kênh phụ không được làm hỏng việc
+    bóc khối lượng đang chạy.
+    """
+    try:
+        task_id = getattr(getattr(task, "request", None), "id", None)
+        if not task_id:
+            return
+        from src.task_events import publish
+        publish(task_id, payload)
+    except Exception:
+        pass
+
+
 @app.task(bind=True)
 def parse_cad_to_db_task(self, dwg_path: str, user_id: str):
     """
@@ -54,23 +72,33 @@ def parse_cad_to_db_task(self, dwg_path: str, user_id: str):
     # `src/api.py` thay vì chỉ thấy PENDING tĩnh suốt quá trình xử lý.
     # Best-effort: không có request/broker thật (VD chạy `.run()` trực tiếp trong test,
     # hoặc Redis backend tạm gián đoạn) thì bỏ qua thay vì làm hỏng cả tác vụ chính.
+    progress_logs = [f"Đang đọc bản vẽ: {os.path.basename(dwg_path)}",
+                     "Đang bóc khối lượng (Block/Layer)..."]
     try:
-        self.update_state(state='PROGRESS', meta={
-            "logs": [f"Đang đọc bản vẽ: {os.path.basename(dwg_path)}",
-                     "Đang bóc khối lượng (Block/Layer)..."],
-        })
+        self.update_state(state='PROGRESS', meta={"logs": progress_logs})
     except Exception:
         pass
+    _publish_event(self, {"status": "Processing", "logs": progress_logs})
 
     # Invoke StructuredTool
-    result_text = auto_quantity_takeoff.invoke({
-        "file_path": dwg_path,
-        "output_excel_path": output_excel_path
-    })
-    
-    return {
-        "status": "success", 
-        "file": dwg_path, 
+    try:
+        result_text = auto_quantity_takeoff.invoke({
+            "file_path": dwg_path,
+            "output_excel_path": output_excel_path
+        })
+    except Exception as e:
+        # Phát sự kiện lỗi TRƯỚC khi ném lại: nếu không, client đang nghe WebSocket sẽ
+        # treo cho tới khi hết thời gian chờ thay vì biết ngay là task đã hỏng.
+        _publish_event(self, {"status": "error", "logs": [str(e)]})
+        raise
+
+    result = {
+        "status": "success",
+        "file": dwg_path,
         "excel_path": output_excel_path,
         "logs": result_text
     }
+    _publish_event(self, {"status": "success",
+                          "logs": ["Phân tích hoàn tất", "Bảng BOQ đã sẵn sàng."],
+                          "result": result})
+    return result

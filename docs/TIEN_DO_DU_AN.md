@@ -7,14 +7,18 @@ chạy được thật, cái gì mới chỉ viết xong mà chưa kiểm chứn
 **Cập nhật lần cuối:** 2026-08-13 — sau đợt quét sâu viết lại đặc tả. Đặc tả đầy đủ nay
 nằm ở [`DAC_TA_HE_THONG.md`](DAC_TA_HE_THONG.md); lỗ hổng tìm được ở
 [`RA_SOAT_LO_HONG.md`](RA_SOAT_LO_HONG.md) (nặng nhất: xác thực JWT chưa từng có hiệu
-lực — API mở toang ở chế độ JWT, nay đã bịt).
+lực — API mở toang ở chế độ JWT, nay đã bịt). Sau đó đã trả **toàn bộ** nợ kỹ thuật sửa
+được bằng code: xóa hết module patch, thêm quyền sở hữu tài nguyên, hạn mức upload/tần
+suất, mật khẩu Redis, và đẩy tiến độ thật qua Redis Pub/Sub. Phần còn lại đều cần tài
+nguyên thật (Docker daemon, GPU, hạ tầng Postgres/S3, Revit/AutoCAD) — xem bảng cuối
+[`RA_SOAT_LO_HONG.md`](RA_SOAT_LO_HONG.md).
 
 ## 1. Số liệu hiện trạng
 
 | Chỉ số | Giá trị | Ghi chú |
 |---|---:|---|
-| Mã nguồn Python (`src/`) | ~13.000 dòng | 59 module |
-| Test Python | **617 đạt / 0 lỗi** | 59 file trong `tests/` |
+| Mã nguồn Python (`src/`) | ~13.470 dòng | 61 module (xóa 4 module patch, thêm 6 module chức năng) |
+| Test Python | **654 đạt / 0 lỗi** | 62 file trong `tests/` |
 | Test giao diện | **7 đạt / 0 lỗi** | Playwright, Chromium thật (`web/tests-ui/`) |
 | Số PR đã hợp nhất | 32 | tính tới `c44e3b3` |
 | Phase đã hợp nhất | A, B, C, D | xem mục 2 |

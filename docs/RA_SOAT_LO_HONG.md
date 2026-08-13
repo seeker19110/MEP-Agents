@@ -10,14 +10,14 @@ Mục nào chưa chạy được thì ghi rõ là chưa chạy.
 | # | Vấn đề | Mức | Trạng thái |
 |---|---|---|---|
 | 1 | Xác thực JWT chưa từng có hiệu lực — API mở toang ở chế độ JWT | 🔴 Nghiêm trọng | ✅ Đã sửa |
-| 2 | Tài liệu nói "hết patch" trong khi 4 module vẫn gán đè lúc import | 🟠 Cao | ⚠️ Đã đính chính, còn 3 module |
+| 2 | Tài liệu nói "hết patch" trong khi 4 module vẫn gán đè lúc import | 🟠 Cao | ✅ Đã trả — **xóa hết 4 module patch** |
 | 3 | Celery nhận `pickle` — chạy code tùy ý qua broker | 🟠 Cao | ✅ Đã sửa |
 | 4 | Endpoint AutoCAD nhận đường dẫn tùy ý — công cụ dò file | 🟠 Cao | ✅ Đã sửa (chặn theo đuôi + chế độ nghiêm ngặt) |
 | 5 | `qs_auditor` nhận cả 90 tool, gồm tool sửa bản vẽ | 🟠 Cao | ✅ Đã sửa |
-| 6 | Không có quyền sở hữu tài nguyên — ai cũng tải được BOQ của người khác | 🟠 Cao | ❌ Chưa làm (cần đa người dùng) |
-| 7 | `tools_lazy` cache vĩnh viễn, không có đường làm mới | 🟡 Vừa | ⚠️ Đã ghi nhận |
-| 8 | Redis trong Compose không mật khẩu, cổng mở ra host | 🟡 Vừa | ⚠️ Đã ghi nhận |
-| 9 | Không giới hạn tần suất, không giới hạn dung lượng upload | 🟡 Vừa | ❌ Chưa làm |
+| 6 | Không có quyền sở hữu tài nguyên — ai cũng tải được BOQ của người khác | 🟠 Cao | ✅ Đã trả |
+| 7 | `tools_lazy` cache vĩnh viễn, không có đường làm mới | 🟡 Vừa | ✅ Đã trả |
+| 8 | Redis trong Compose không mật khẩu, cổng mở ra host | 🟡 Vừa | ✅ Đã trả (chưa chạy thử được) |
+| 9 | Không giới hạn tần suất, không giới hạn dung lượng upload | 🟡 Vừa | ✅ Đã trả |
 | 10 | Bộ test cũ không hề kiểm tra xác thực qua request thật | 🟠 Cao | ✅ Đã sửa (17 test mới) |
 
 ---
@@ -61,33 +61,48 @@ nên chạy chế độ JWT thì kênh WebSocket hoặc mở toang hoặc không
 
 ---
 
-## 2. 🟠 Tài liệu nói "hết patch" trong khi 4 module vẫn gán đè ⚠️ Đã đính chính
+## 2. 🟠 Tài liệu nói "hết patch" trong khi 4 module vẫn gán đè ✅ Đã trả
 
 `TECH_DEBT.md` mục 10 ghi *"✅ Đã trả — không còn chỗ nào gán đè hàm/tool"*, và
-`CLAUDE.md` nhắc lại. **Không đúng.** Tại thời điểm rà soát, bốn module vẫn gán đè lúc
+`CLAUDE.md` nhắc lại. **Không đúng.** Tại thời điểm rà soát, năm module vẫn gán đè lúc
 import:
 
 | Module | Gán đè cái gì | Rủi ro |
 |---|---|---|
-| `api_phase_c_mount.py` | `api.require_api_key` | 🔴 **Vô tác dụng → lỗ hổng.** Xem mục 1 — đã gỡ |
-| `cad_loader_perf_patch.py` | `cad_loader.load_drawing`, `resolve_xref_segments` | 🟠 Chính module đã sinh ra sự cố XREF ở PR #32. Nay có giữ tham chiếu gốc đúng cách và có ghi chú cấm gán đè `ezdxf.readfile` |
-| `agents_perf_patch.py` | `agents.call_mepf_agent` | 🟡 Ai `from src.agents import call_mepf_agent` sẽ lấy bản chưa cắt message |
+| `api_phase_c_mount.py` | `api.require_api_key` | 🔴 **Vô tác dụng → lỗ hổng.** Xem mục 1 |
+| `cad_loader_perf_patch.py` | `cad_loader.load_drawing`, `resolve_xref_segments` | 🟠 Chính module đã sinh ra sự cố XREF ở PR #32 |
+| `agents_perf_patch.py` | `agents.call_mepf_agent` | 🟡 Ai `from src.agents import call_mepf_agent` lấy bản chưa cắt message |
 | `qs_perf_patch.py` | `qs_tools.load_unit_prices` | 🟡 Tương tự, với cache đơn giá |
-| `tools_lazy.py` | `tools.get_tools_for_role` | 🟡 Xem mục 7 |
+| `tools_lazy.py` | `tools.get_tools_for_role` | 🟡 Cộng thêm mục 7 |
 
-Ba module perf còn lại **chưa gỡ trong đợt này**, và đây là lựa chọn có chủ ý: cả ba đều
-là lớp tối ưu bọc quanh một hàm, gỡ đúng cách cần một điểm nối thứ tư (kiểu
-`register_wrapper`) hoặc đưa logic vào thẳng hàm gốc — cả hai đều là thay đổi kiến trúc
-đáng một PR riêng, không nên trộn vào một PR viết đặc tả. Gỡ vội mà không có test đo được
-hiệu năng trước/sau là đúng kiểu thay đổi đã sinh ra sự cố XREF.
+**Đã trả hết — bằng cách XÓA, không phải thêm tầng.** Bản rà soát trước đề xuất dựng điểm
+nối thứ tư (`register_wrapper`). Nhìn kỹ lại thì cả bốn module perf chỉ làm đúng một việc:
+bọc một hàm để thêm cache hoặc cắt bớt dữ liệu. Không có thứ tự phụ thuộc, không có nhiều
+lớp chồng nhau, không ai cần gỡ ra lúc chạy. Dựng cả một registry cho nhu cầu đó là thêm
+phức tạp mà không đổi được rủi ro — trong khi đưa logic về thẳng hàm gốc thì **xóa được
+bốn module** và diệt luôn cả lớp lỗi. Đúng nguyên tắc "xóa nhiều hơn thêm" của dự án.
 
-**Đã làm:** đính chính `TECH_DEBT.md` mục 10 và `CLAUDE.md` để tài liệu nói đúng hiện
-trạng. Một tài liệu báo "đã sạch" trong khi còn 4 chỗ nguy hiểm còn tệ hơn không có tài
-liệu — người đọc sau sẽ không đi tìm.
+| Module đã xóa | Logic nay nằm ở |
+|---|---|
+| `agents_perf_patch.py` | `agents.py::_trimmed_messages`, gọi trong `call_mepf_agent` |
+| `qs_perf_patch.py` | `qs_tools.py::load_unit_prices` (ba tầng cache: bộ nhớ → Redis → đĩa) |
+| `cad_loader_perf_patch.py` | `cad_loader.py::load_drawing` + mặc định `readfile` của `resolve_xref_segments` |
+| `tools_lazy.py` | `tools.py::get_tools_for_role` + `clear_role_tools_cache` + `register_role_tool` |
 
-**Đề xuất PR tiếp theo:** thêm điểm nối thứ tư `register_wrapper(tên, hàm_bọc, ưu tiên)`
-theo đúng mẫu `supervisor_pipeline`, chuyển ba module perf sang dùng nó, kèm test khẳng
-định danh tính hàm không đổi sau khi import.
+**Lợi ích không chỉ là gọn hơn.** Các tối ưu này trước đây chỉ có tác dụng với ai import
+`src.graph` trước — nghĩa là **Celery worker, `python -m src.ingest` và mọi test gọi thẳng
+module đều lặng lẽ chạy bản chưa tối ưu**. Không ai từng biết, vì không có dấu hiệu gì.
+
+**Chống tái phát:** `tests/test_no_import_patching.py` chạy trong **tiến trình con** cố ý
+không import `src.graph`, khẳng định cắt message / cache DXF / cache tool đều hoạt động,
+và danh tính năm hàm lõi không đổi sau khi nạp `src.graph`. Phải tách tiến trình vì trong
+cùng một phiên pytest, file test khác đã import `src.graph` rồi — đúng cái làm lớp lỗi này
+vô hình suốt thời gian dài.
+
+**Một lỗi cùng gốc tìm thấy trong lúc gỡ:** `load_unit_prices` đọc bảng đơn giá từ Redis
+bằng `pickle.loads` — chạy code tùy ý trong tiến trình QS nếu ai đó ghi được vào Redis.
+Cùng lớp lỗi với mục 3, và Redis vốn không đặt mật khẩu (mục 8). Nay đọc/ghi bằng Arrow
+IPC, thứ chỉ mang dữ liệu bảng chứ không mang code.
 
 ---
 
@@ -156,67 +171,110 @@ graph — để lần sau thêm vai trò mà quên khai báo thì test đỏ, th
 
 ---
 
-## 6. 🟠 Không có quyền sở hữu tài nguyên ❌ Chưa làm
+## 6. 🟠 Không có quyền sở hữu tài nguyên ✅ Đã trả
 
 Xác thực trả lời "anh là ai", nhưng **không có chỗ nào hỏi "cái này có phải của anh
-không"**:
+không"**: ai xác thực được là tải được BOQ của **bất kỳ** `task_id` nào. `task_id` là UUID
+nên khó đoán, nhưng "khó đoán" không phải là kiểm soát truy cập — UUID lộ ra trong log,
+trong URL chia sẻ, trong ảnh chụp màn hình. Tham số `user_id` của `parse_cad_to_db_task`
+thì được nhận rồi **bỏ đi**, API luôn truyền hằng số `"web_client"`/`"cad_client"`.
 
-- `GET /api/v1/download/{task_id}` — ai xác thực được là tải được BOQ của **bất kỳ**
-  `task_id` nào. `task_id` là UUID nên khó đoán, nhưng "khó đoán" không phải là kiểm soát
-  truy cập.
-- `parse_cad_to_db_task(dwg_path, user_id)` — nhận `user_id` rồi **không dùng vào việc
-  gì**. API luôn truyền hằng số `"web_client"` / `"cad_client"`.
-- Worker không đặt workspace theo người dùng, nên mọi phiên ghi vào cùng `uploads/` và
-  `data/boq/`.
+**Đã trả.** Thêm `src/task_owner.py`: bản ghi "task này của ai", lưu ở Redis (dùng chung
+giữa các tiến trình API/Worker) và rơi về bộ nhớ tiến trình khi không có Redis.
 
-**Vì sao chưa làm:** đây là phần lõi của đa người dùng thật (mục 6 `TECH_DEBT.md`), cần
-CSDL người dùng + mô hình phân quyền mà chưa ai duyệt thiết kế. Vá nửa vời (VD nhét
-`user_id` vào JWT rồi so sánh chuỗi) tạo cảm giác an toàn sai, nguy hiểm hơn là ghi rõ
-chưa có. **Cho tới khi làm xong: không triển khai hệ thống này cho nhiều khách hàng dùng
-chung một instance.** Câu này cũng đã ghi vào đặc tả mục 7.3.
+- `require_api_key` nay **trả về danh tính** (`sub` của JWT, hoặc khóa chung, hoặc nặc
+  danh) thay vì chỉ gật đầu. Endpoint nhận qua `identity: str = Depends(...)` — khai trong
+  `dependencies=[...]` thì giá trị trả về bị vứt đi.
+- Chủ sở hữu được ghi ngay khi tạo task, ở cả hai đường (`/takeoff` và
+  `/autocad/analyze`), và `user_id` thật được truyền xuống Worker thay cho hằng số.
+- `/api/v1/task/{id}`, `/api/v1/download/{id}` và **kênh WebSocket** đều kiểm tra. Bỏ sót
+  WebSocket là bịt cửa trước để ngỏ cửa sau — nó cũng là một đường đọc dữ liệu task.
 
----
+**Ba luật, và lý do của luật thứ nhất.** Kiểm tra được bỏ qua khi hệ thống chỉ có MỘT chủ
+thể: không bật xác thực, **hoặc** xác thực bằng khóa chung. Khóa chung theo định nghĩa là
+một danh tính dùng chung — ai có khóa cũng là cùng một người — nên so sánh chủ sở hữu
+không thêm được chút an toàn nào mà chỉ thêm một đường hỏng (mất bản ghi là chặn nhầm
+người dùng hợp lệ). Có bản ghi thì phải khớp. Không có bản ghi mà đang chạy danh tính
+riêng (JWT) thì **từ chối** — fail-closed có chủ ý: người dùng chỉ cần chạy lại phân tích,
+còn cho qua thì không ai biết là đã cho qua.
 
-## 7. 🟡 `tools_lazy` cache vĩnh viễn ⚠️ Đã ghi nhận
+> **Giới hạn phải nói rõ:** `MEP_AGENTS_API_KEY` là khóa cấp quản trị. Ai cầm nó đọc được
+> task của mọi người, kể cả của người dùng JWT. Muốn tách người dùng thật thì dùng JWT và
+> **không** phát khóa chung ra ngoài. Đây là giới hạn của cơ chế khóa chung, không phải
+> lỗi — nhưng phải nói ra để không ai phát nó cho từng khách hàng rồi tưởng đã tách được
+> dữ liệu.
 
-`src/tools_lazy.py` cache kết quả `get_tools_for_role` theo vai trò và **không bao giờ tự
-làm mới**. Hàm `clear_role_tools_cache()` có tồn tại nhưng không ai gọi. Đăng ký tool mới
-lúc chạy thì vai trò nào đã được hỏi trước đó sẽ mãi nhận danh sách cũ — im lặng, không
-cảnh báo.
-
-Hiện tại **chưa gây lỗi** vì `TOOLS_BY_ROLE` là bảng tĩnh, dựng xong lúc import. Nó chỉ
-thành lỗi khi có ai thêm tool động lúc chạy. Ghi lại ở đây để lần đó không mất buổi chiều
-đi tìm. Nên gộp vào PR "điểm nối thứ tư" ở mục 2: registry nào thay đổi thì gọi
-`clear_role_tools_cache()`.
-
----
-
-## 8. 🟡 Redis trong Compose không mật khẩu ⚠️ Đã ghi nhận
-
-`docker-compose.yml` chạy Redis không đặt `requirepass`. Redis vừa là broker Celery vừa là
-result backend, tức là ai ghi được vào Redis thì điều khiển được Worker (rõ rệt nhất khi
-kết hợp mục 3, nay đã bịt).
-
-**Chưa sửa trong đợt này** vì đúng nguyên tắc của dự án: `docker-compose.yml` **chưa từng
-chạy thật** (môi trường viết code không có Docker daemon — `TECH_DEBT.md` mục 3). Sửa cấu
-hình hạ tầng mà không chạy thử được là đoán mò; nó thuộc về đúng buổi mà người có Docker
-ngồi chạy `docker compose up --build` lần đầu.
-
-**Việc cần làm trong buổi đó:** đặt `requirepass` qua biến môi trường, bỏ `ports:` của
-Redis ra khỏi host (chỉ để các service trong mạng nội bộ nói chuyện với nhau), và cập nhật
-`CELERY_BROKER_URL` sang dạng `redis://:<mật khẩu>@redis:6379/0`.
+**Còn lại của việc đa người dùng:** vẫn chưa có CSDL người dùng (JWT hiện chỉ có một tài
+khoản bootstrap từ biến môi trường), chưa có phân quyền theo vai trò, chưa thu hồi được
+token, và Worker vẫn ghi vào `uploads/` chung thay vì workspace riêng từng người. Quyền sở
+hữu tài nguyên là mảnh lớn nhất và đã xong; ba mảnh còn lại vẫn thuộc mục 6 của
+`TECH_DEBT.md`.
 
 ---
 
-## 9. 🟡 Không giới hạn tần suất, không giới hạn dung lượng upload ❌ Chưa làm
+## 7. 🟡 Cache tool theo vai trò không có đường làm mới ✅ Đã trả
+
+`tools_lazy` cache kết quả `get_tools_for_role` và **không bao giờ tự làm mới**. Hàm
+`clear_role_tools_cache()` có tồn tại nhưng không ai gọi — cache chỉ có đường vào, không
+có đường ra.
+
+**Đã trả** cùng lúc với mục 2: cache nay nằm trong `tools.py`, kèm `clear_role_tools_cache()`
+và `register_role_tool(role, tool)` — đường đúng để thêm tool lúc chạy, tự xóa cache.
+Thêm một sửa nhỏ mà quan trọng: `get_tools_for_role` trả về **bản sao**. Bản cũ trả thẳng
+danh sách trong cache, trong khi `agents.build_tools_for_llm` có `append` thêm
+`replace_blocks_by_mapping` vào chính danh sách nhận được — tức là mỗi lượt gọi lại nhồi
+thêm một tool vào bản cache dùng chung. Canh bằng `test_role_tools_result_is_a_copy`.
+
+---
+
+## 8. 🟡 Redis trong Compose không mật khẩu ✅ Đã trả (chưa chạy thử được)
+
+Redis vừa là broker Celery vừa là result backend: ai ghi được vào đó là điều khiển được
+Worker, mà Worker đọc/ghi được toàn bộ thư mục bản vẽ.
+
+**Đã sửa trong `docker-compose.yml`:**
+
+- `redis-server --requirepass ${REDIS_PASSWORD:?...}` — cú pháp `:?` là cố ý: thiếu biến
+  thì `docker compose up` **dừng kèm thông báo rõ** thay vì lặng lẽ chạy mở toang. Đây là
+  chỗ duy nhất trong dự án không áp dụng graceful fallback: một hàng đợi mở không phải là
+  suy giảm nhẹ nhàng, mà là mất quyền kiểm soát Worker.
+- Mọi URL Redis đổi sang `redis://:${REDIS_PASSWORD}@redis:6379/0`; `healthcheck` dùng
+  `redis-cli -a`; ba chỗ đọc Redis trong code (`qs_tools`, `task_owner`, `task_events`)
+  đều đọc thêm `REDIS_PASSWORD`.
+- **Postgres**: `ports: "5432:5432"` → `"127.0.0.1:5432:5432"`. Dạng cũ nghe trên **mọi**
+  địa chỉ của máy chủ, kèm mật khẩu mặc định ghi thẳng trong file — cơ sở dữ liệu coi như
+  công khai nếu máy có IP công cộng.
+
+**Chưa chạy thử được:** đã xác nhận `REDIS_PASSWORD=... docker compose config` parse thành
+công và thiếu biến thì báo lỗi đúng như thiết kế, nhưng **chưa từng chạy `docker compose
+up --build`** — môi trường viết code không có Docker daemon. Vẫn nguyên như `TECH_DEBT.md`
+mục 3 đã ghi: cần người có Docker thật chạy một lần cho tử tế.
+
+---
+
+## 9. 🟡 Không giới hạn tần suất, không giới hạn dung lượng upload ✅ Đã trả
 
 `POST /api/v1/takeoff` đọc **toàn bộ** file vào RAM (`await file.read()`) rồi mới ghi đĩa,
-không kiểm tra dung lượng. Một file 5 GB là một lần hết RAM. Không endpoint nào có giới
-hạn tần suất, và mỗi lần gọi đều tốn token LLM thật — tức là tốn tiền thật.
+không kiểm tra dung lượng. Một file 5 GB là một lần hết RAM của cả tiến trình API.
 
-Chưa làm vì cần biết hạn mức thật của môi trường triển khai (dung lượng bản vẽ lớn nhất
-khách hay gửi, số request/phút chấp nhận được) — con số tự bịa sẽ chặn nhầm bản vẽ hợp lệ,
-mà chặn nhầm bản vẽ của khách còn tệ hơn không chặn. Cần một buổi ngồi với người vận hành.
+**Đã sửa:**
+
+- Ghi theo khối 1 MB, dừng ngay khi vượt `MAX_UPLOAD_MB` (mặc định 200) và trả 413. Phần
+  đã ghi được **xóa đi** — file dở dang vừa tốn đĩa vừa có thể bị đọc nhầm thành bản vẽ
+  hỏng ở lượt sau.
+- `src/rate_limit.py`: cửa sổ trượt, đếm theo **danh tính** chứ không theo địa chỉ IP
+  (nhiều người dùng có thể chung một IP sau NAT, và một người có thể đổi IP). Áp cho
+  endpoint tạo việc nặng qua dependency `require_quota`; endpoint đọc trạng thái **không**
+  bị giới hạn — chặn cả đường đó sẽ làm hỏng chính vòng theo dõi tiến độ của Web App.
+
+> **Mức bảo vệ thật sự có:** bộ đếm nằm trong RAM của từng tiến trình, nên chạy nhiều
+> worker uvicorn thì hạn mức thực tế là `giới hạn × số worker`. Đây là chốt chặn chống lạm
+> dụng vô ý và script ngây thơ, **không phải** phòng thủ trước tấn công từ chối dịch vụ có
+> chủ đích — thứ đó cần bộ đếm dùng chung (Redis) hoặc chặn ở tầng reverse proxy.
+
+Con số mặc định (200 MB, 60 request/phút) là ước lượng rộng rãi, **chưa đối chiếu với số
+liệu vận hành thật**. Cả hai đều chỉnh được bằng biến môi trường; nên xem lại sau khi có
+bản vẽ và lưu lượng thật của khách.
 
 ---
 
@@ -237,26 +295,60 @@ token giả mạo, WebSocket, và router đăng nhập.
 
 ---
 
+## 11. 🟡 WebSocket vẫn tự polling ở phía server ✅ Đã trả
+
+Ghi nhận thêm trong đợt này (`TECH_DEBT.md` mục 4 đã nêu, chưa ai làm). Nhìn từ trình
+duyệt thì `/ws/task/{id}` là real-time, nhưng nhìn từ server nó vẫn là vòng lặp hỏi Celery
+result backend **mỗi giây, cho mỗi kết nối**: 100 người xem cùng lúc là 100 vòng lặp, phần
+lớn để nhận lại đúng cái đã biết. Độ trễ cũng bị chặn dưới bởi chu kỳ polling.
+
+**Đã sửa:** thêm `src/task_events.py` — Worker tự phát sự kiện lên channel Redis Pub/Sub
+khi trạng thái đổi (bắt đầu xử lý, xong, lỗi), endpoint WebSocket đăng ký nghe channel đó
+thay vì tự hỏi vòng quanh.
+
+Ba chi tiết quyết định việc này có dùng được thật hay không:
+
+1. **Luôn gửi trạng thái hiện tại trước.** Client mở kết nối muộn (task đã xong) sẽ không
+   nhận được sự kiện nào nữa; chỉ ngồi chờ Pub/Sub là treo vô hạn dù dữ liệu đã sẵn sàng.
+2. **Vẫn có thời gian chờ tối đa** (5 giây) rồi tra lại trạng thái. Không phải chu kỳ
+   polling — có sự kiện thì nhận ngay — mà là lưới an toàn cho trường hợp Worker chết giữa
+   chừng, không kịp phát sự kiện nào.
+3. **Không có Redis thì quay về đường polling cũ**, y nguyên hành vi trước. Mất tối ưu,
+   không mất tính năng.
+
+Task cũng phát sự kiện lỗi **trước khi** ném lại exception: nếu không, client đang nghe sẽ
+treo tới hết thời gian chờ thay vì biết ngay là task đã hỏng.
+
+**Còn lại của mục 4 `TECH_DEBT.md`:** plugin AutoCAD/Revit vẫn là gửi một lần rồi chờ HTTP
+response, chưa nhận cập nhật real-time. Cần sửa phía plugin C#, không phải phía Python.
+
+---
+
 ## Tổng kết đợt rà soát
 
 | Chỉ số | Trước | Sau |
 |---|---:|---:|
-| Test | 600 | **617** |
-| Lỗ hổng bảo mật đã bịt | — | 3 (mục 1, 3, 4) |
+| Test | 600 | **654** |
+| Module `src/` | 59 | 61 (xóa 4 module patch, thêm 6 module chức năng) |
+| Lỗ hổng bảo mật đã bịt | — | 5 (mục 1, 3, 4, 6, 8) + pickle trong `load_unit_prices` |
 | Sai phạm vi quyền đã sửa | — | 1 (mục 5) |
-| Vấn đề ghi nhận, chưa làm | — | 5 (mục 2 phần còn lại, 6, 7, 8, 9) |
+| Module patch còn lại | 5 | **0** |
+| Vấn đề ghi nhận, chưa làm | — | 0 mục sửa được bằng code |
 
-## Lộ trình đề xuất, theo thứ tự
+## Còn lại — và vì sao chưa làm được ở đây
 
-1. **Điểm nối thứ tư `register_wrapper`** → gỡ nốt ba module perf còn gán đè (mục 2), gộp
-   luôn việc làm mới cache của `tools_lazy` (mục 7). Thuần refactor, có test canh, không
-   cần hạ tầng gì thêm — nên làm trước.
-2. **Chạy thật `docker compose up --build`** một lần cho tử tế → đóng mục 8 và phần "chưa
-   chạy thử" của `TECH_DEBT.md` mục 3. Cần người có Docker daemon.
-3. **Đa người dùng thật** (mục 6) — CSDL người dùng, quyền sở hữu tài nguyên, workspace
-   theo người dùng trong Worker. Việc lớn nhất còn lại, và là điều kiện bắt buộc trước khi
-   nhiều khách hàng dùng chung một instance.
-4. **Giới hạn tần suất và dung lượng** (mục 9) — sau khi có số liệu vận hành thật.
+Mọi mục sửa được bằng code đã sửa. Phần còn lại **không phải là code chưa viết**, mà là
+việc cần tài nguyên hoặc quyết định mà môi trường viết code không có. Ghi đúng như backlog,
+không viết code đoán trước — cùng lý do đã ghi ở đầu `TECH_DEBT.md`.
 
-Ba việc 2–4 đều cần tài nguyên hoặc quyết định mà môi trường viết code không có. Ghi ra
-đây đúng như backlog, không viết code đoán trước — cùng lý do đã ghi ở đầu `TECH_DEBT.md`.
+| Việc | Cần gì để làm | Vì sao không đoán trước được |
+|---|---|---|
+| Chạy thật `docker compose up --build` | Máy có Docker daemon | Rất có thể lộ lỗi runtime chưa lường: quyền thư mục volume, thiếu biến bắt buộc, healthcheck sai lệnh. Chỉ chạy thật mới biết |
+| CSDL người dùng + phân quyền + thu hồi token | Duyệt thiết kế schema | Tự bịa schema chưa ai duyệt rồi migrate là rủi ro cao hơn để trống |
+| Postgres/pgvector/S3 thật | Instance thật để migrate và chạy thử | Như trên |
+| Workspace riêng từng người trong Worker | Đi cùng CSDL người dùng | Không tách được khỏi việc trên |
+| Local LLM air-gapped | GPU 16–24 GB VRAM | Mua/thuê phần cứng, không phải sửa code |
+| YOLO nhận diện ký hiệu bản vẽ rác | Dữ liệu gán nhãn thật | Model huấn luyện trên dữ liệu bịa còn tệ hơn không có model |
+| Kiểm thử thật với Revit/AutoCAD | Máy cài Revit/AutoCAD | Không giả lập được |
+| Real-time cho plugin AutoCAD/Revit | Sửa phía plugin C# | Nằm ngoài phần Python; cần môi trường build plugin |
+| Chỉnh số hạn mức upload/tần suất | Số liệu vận hành thật | Con số tự bịa sẽ chặn nhầm bản vẽ hợp lệ của khách — tệ hơn không chặn |

@@ -12,6 +12,7 @@ tức là chưa dùng được cho hồ sơ thầu. Ở đây:
 
 Toàn bộ phép tính là Python xác định, LLM không tham gia tính tiền.
 """
+import io
 import json
 import logging
 import math
@@ -114,21 +115,39 @@ def unit_price_freshness_note(meta_path: str = None) -> str:
 def load_unit_prices(csv_path: str = None) -> pl.DataFrame:
     """Nạp bảng đơn giá. Đọc từ project root (tài nguyên dùng chung), không phải
     workspace của phiên — mọi phiên tra cùng một bảng giá.
-    Có tích hợp Cache Redis để giảm thời gian đọc I/O đĩa.
+
+    Ba tầng cache, từ nhanh xuống chậm: bộ nhớ tiến trình → Redis → đọc CSV từ đĩa.
+    Tầng bộ nhớ nằm THẲNG ở đây thay vì được gắn thêm lúc import (`qs_perf_patch` cũ gán
+    đè chính hàm này) — ai giữ tham chiếu hàm từ trước sẽ bỏ qua cache mà không biết.
     """
+    from src.unit_price_cache import mem_get, mem_set
+
+    mem_key = f"unit_prices:{csv_path or 'default'}"
+    hit = mem_get(mem_key)
+    if hit is not None:
+        return hit
+
     try:
         import redis
-        import pickle
         # Đọc qua biến môi trường thay vì hardcode "localhost" — cùng lý do đã sửa ở
         # src/celery_app.py: trong Docker Compose, "localhost" là container riêng của
         # chính process này, không phải service Redis (xem docker-compose.yml).
         redis_host = os.environ.get("REDIS_HOST", "localhost")
         redis_port = int(os.environ.get("REDIS_PORT", "6379"))
-        r = redis.Redis(host=redis_host, port=redis_port, db=0, socket_connect_timeout=1)
+        redis_password = os.environ.get("REDIS_PASSWORD", "") or None
+        r = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_password,
+                        socket_connect_timeout=1)
         cache_key = f"mep_unit_prices_{csv_path or 'default'}"
         cached_data = r.get(cache_key)
         if cached_data:
-            return pickle.loads(cached_data)
+            # Đọc bằng Arrow IPC, KHÔNG phải pickle. Trước đây chỗ này `pickle.loads`
+            # thẳng dữ liệu lấy từ Redis: ai ghi được vào Redis là chạy được code tùy ý
+            # trong tiến trình QS. Cùng lớp lỗi với `accept_content=['pickle']` của
+            # Celery (xem docs/RA_SOAT_LO_HONG.md mục 3), và Redis trong Compose vốn
+            # không đặt mật khẩu. Arrow IPC chỉ mang dữ liệu bảng, không mang code.
+            df = pl.read_ipc(io.BytesIO(cached_data))
+            mem_set(mem_key, df)
+            return df
     except Exception as e:
         r = None
         logger.debug(f"Redis cache không khả dụng: {e}")
@@ -143,9 +162,12 @@ def load_unit_prices(csv_path: str = None) -> pl.DataFrame:
         pl.col("don_gia_may").cast(pl.Float64, strict=False).fill_null(0.0),
     ])
         
+    mem_set(mem_key, df)
     if r is not None:
         try:
-            r.setex(cache_key, 3600, pickle.dumps(df))  # Cache 1 hour
+            buf = io.BytesIO()
+            df.write_ipc(buf)
+            r.setex(cache_key, 3600, buf.getvalue())  # Cache 1 hour
         except Exception:
             pass
 

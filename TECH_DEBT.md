@@ -11,20 +11,22 @@ Trạng thái tổng thể và số liệu hiện hành nằm ở [`docs/TIEN_DO
 | 7 | Bảo mật API (path traversal + không xác thực) | 🔴 Khẩn cấp | ✅ Đã trả (path traversal + API key + CORS) |
 | 1 | Database & lưu trữ (Postgres/pgvector/S3) | 🟠 Cao | Chưa làm — cần hạ tầng thật, xem lý do bên dưới |
 | 3 | Hạ tầng triển khai (Docker) | 🟠 Cao | ✅ Đã viết đủ 4 service — **chưa chạy thử được** (không có Docker daemon ở môi trường viết code) |
-| 4 | Real-time (WebSocket) | 🟡 Trung bình | Đã làm 1 phần |
+| 4 | Real-time (WebSocket) | 🟡 Trung bình | ✅ Phía server đã trả (Redis Pub/Sub); plugin Revit/AutoCAD vẫn chưa |
 | 8 | Plugin/Web hardcode địa chỉ server | 🟡 Trung bình | ✅ Đã trả (Revit/AutoCAD/Web đều hết hardcode) |
 | 5 | Computer Vision (YOLO cho bản vẽ rác) | 🟡 Trung bình | Đã làm 1 phần — cần dữ liệu gán nhãn thật |
 | 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | ✅ E2E (hạ tầng thật) + test UI Playwright đều đã chạy đạt; Revit/AutoCAD vẫn chưa |
 | 11 | Bảng đơn giá cũ mà không ai cảnh báo | 🟠 Cao | ✅ Đã trả — xem mục 11 |
 | 12 | Vòng lặp import giữa `tools.py` và `qs_tools.py` | 🟢 Thấp | ✅ Đã trả — xem mục 12 |
 | 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm — cần phần cứng thật |
-| 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Chưa làm — cần tài khoản cổng thanh toán thật |
-| 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | ⚠️ Trả phần lớn — **còn 3 module vẫn gán đè**; xem mục 10 |
+| 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Còn CSDL người dùng + phân quyền; quyền sở hữu tài nguyên đã xong (mục 14) |
+| 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | ✅ Đã trả — **xóa hết module patch**; xem mục 10 |
 | 13 | Xác thực JWT chưa từng có hiệu lực (API mở toang ở chế độ JWT) | 🔴 Khẩn cấp | ✅ Đã trả — xem [`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md) mục 1 |
-| 14 | Chưa có quyền sở hữu tài nguyên (ai cũng tải được BOQ của người khác) | 🟠 Cao | Chưa làm — nằm trong việc đa người dùng (mục 6) |
+| 14 | Chưa có quyền sở hữu tài nguyên (ai cũng tải được BOQ của người khác) | 🟠 Cao | ✅ Đã trả — `src/task_owner.py` |
+| 15 | Không giới hạn tần suất / dung lượng upload | 🟡 Trung bình | ✅ Đã trả — `src/rate_limit.py`, ghi upload theo khối |
+| 16 | Redis trong Compose không mật khẩu | 🟡 Trung bình | ✅ Đã viết — **chưa chạy thử được** (không có Docker daemon) |
 
-**Không trả được trong lượt này** (mục 1, 2, 6, và phần "chạy thử thật" của mục 3/9): đều
-cần tài nguyên không có sẵn trong môi trường viết code hiện tại — dịch vụ Postgres/S3 thật
+**Không trả được** (mục 1, 2, phần còn lại của mục 6, và phần "chạy thử thật" của mục
+3/9/16): đều cần tài nguyên không có sẵn trong môi trường viết code hiện tại — dịch vụ Postgres/S3 thật
 để migrate vào, GPU 16-24GB VRAM vật lý, tài khoản Stripe/VNPay thật, hoặc Docker
 daemon/Revit/AutoCAD cài sẵn để chạy thử. Viết code đoán trước cho những việc này (VD tự
 bịa schema Postgres chưa ai duyệt, tự đăng ký Stripe giả) rủi ro cao hơn lợi ích — để lại
@@ -268,17 +270,28 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
     đã sinh ra sự cố XREF, nay có giữ tham chiếu gốc đúng cách nhưng vẫn là patch.
   - `tools_lazy` (gán đè `get_tools_for_role`) — xem thêm mục 7 của bản rà soát: cache
     không bao giờ được làm mới.
-- **Còn lại (chưa làm, có chủ đích):**
-  - `agents_perf_patch` (cắt bớt message), `qs_perf_patch` (cache đơn giá),
-    `cad_loader_perf_patch` (cache DXF) và `tools_lazy` (cache tool theo vai trò) vẫn là
-    patch lúc import. Cả bốn đều là **bọc thuần túy quanh một hàm**, không tráo đối tượng
-    tool và không phụ thuộc thứ tự với nhau — khác hẳn `api_phase_c_mount` vốn cố đổi hành
-    vi một dependency đã bị FastAPI chốt cứng.
-  - Hướng trả đúng: thêm điểm nối thứ tư `register_wrapper(tên, hàm_bọc, ưu tiên)` theo
-    mẫu `supervisor_pipeline`, chuyển cả bốn sang dùng, kèm test khẳng định danh tính hàm
-    không đổi sau import và gọi `clear_role_tools_cache()` khi registry đổi. Không gộp vào
-    PR viết đặc tả: gỡ vội mà không có test đo hiệu năng trước/sau là đúng kiểu thay đổi
-    đã sinh ra sự cố XREF.
+- **Đã làm (đợt 6 — hết sạch patch):** bốn module perf còn lại đã bị **XÓA**, không phải
+  chuyển sang một tầng đăng ký mới. Bản kế hoạch trước đề xuất dựng điểm nối thứ tư
+  (`register_wrapper`); nhìn kỹ lại thì cả bốn chỉ làm một việc — bọc một hàm để thêm cache
+  hoặc cắt bớt dữ liệu — không có thứ tự phụ thuộc, không chồng lớp, không ai cần gỡ ra lúc
+  chạy. Dựng registry cho nhu cầu đó là thêm phức tạp mà không đổi rủi ro; đưa logic về
+  thẳng hàm gốc thì xóa được bốn module và diệt luôn cả lớp lỗi.
+
+  | Module đã xóa | Logic nay nằm ở |
+  |---|---|
+  | `agents_perf_patch.py` | `agents.py::_trimmed_messages` |
+  | `qs_perf_patch.py` | `qs_tools.py::load_unit_prices` |
+  | `cad_loader_perf_patch.py` | `cad_loader.py::load_drawing` |
+  | `tools_lazy.py` | `tools.py::get_tools_for_role` |
+
+  Lợi ích không chỉ là gọn hơn: các tối ưu này trước đây **chỉ có tác dụng với ai import
+  `src.graph` trước**, nghĩa là Celery worker và `python -m src.ingest` lặng lẽ chạy bản
+  chưa tối ưu, không có dấu hiệu gì. Canh bằng `tests/test_no_import_patching.py`, chạy
+  trong tiến trình con cố ý không nạp `src.graph`.
+
+  Một lỗi cùng gốc tìm thấy trong lúc gỡ: `load_unit_prices` đọc bảng đơn giá từ Redis bằng
+  `pickle.loads` — chạy code tùy ý nếu ai ghi được vào Redis. Nay dùng Arrow IPC.
+- **Còn lại:** không còn module patch nào.
   - Bắt buộc chạy `uv run pytest -q` **đủ bộ** trước khi hợp nhất mọi PR, không chỉ test
     của Phase đang làm.
 

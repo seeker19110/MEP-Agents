@@ -4,8 +4,9 @@
 gì, ràng buộc nào không được vi phạm, và chỗ nào hiện chưa đạt. Chỗ chưa đạt được liệt kê
 đầy đủ ở [`RA_SOAT_LO_HONG.md`](RA_SOAT_LO_HONG.md) chứ không giấu trong văn xuôi.
 
-**Viết lại:** 2026-08-13, sau đợt quét toàn bộ 59 module `src/` và 59 file test.
-**Mốc kiểm chứng:** `uv run pytest -q` → 617 đạt / 0 lỗi.
+**Viết lại:** 2026-08-13, sau đợt quét toàn bộ `src/` và trả hết nợ kỹ thuật sửa được
+bằng code. **Mốc kiểm chứng:** `uv run pytest -q` → 654 đạt / 0 lỗi, 61 module `src/`,
+62 file test.
 
 ---
 
@@ -81,6 +82,7 @@ mechanical electrical plumbing firefighting qs   cad    bim
 | **CAD** | `cad_loader.py`, `cad_geometry.py`, `cad_standards.py`, `cad_revision.py`, `cad_block_replace.py`, `cad_pipe_ops.py`, `cad_text_ops.py`, `cad_title_ops.py`, `cad_units.py`, `cad_macros.py`, `cad_batch_edit.py`, `cad_cache.py` | Đọc / sửa / tối ưu / chuẩn hóa / lưu revision bản vẽ |
 | **Tra cứu tiêu chuẩn** | `vectorstore.py`, `hybrid_search.py`, `local_embeddings.py`, `ingest.py` | RAG tiêu chuẩn TCVN/ASHRAE/NFPA |
 | **Hạ tầng** | `api.py`, `celery_app.py`, `auth_jwt.py`, `storage.py`, `checkpointer_factory.py`, `config.py`, `workspace.py`, `usage.py` | Cửa ngõ, hàng đợi, xác thực, lưu trữ, cấu hình |
+| **Chốt chặn tài nguyên** | `task_owner.py`, `rate_limit.py`, `task_events.py` | Quyền sở hữu task, giới hạn tần suất, kênh đẩy tiến độ |
 | **Nền** | `mepf_spec.py` | Chuẩn hóa ký hiệu MEPF. **KHÔNG được import module nào khác** |
 
 `mepf_spec.py` cố ý không có phụ thuộc: cả `tools.py` và `qs_tools.py` đều cần nó, mà hai
@@ -184,13 +186,25 @@ trình. Ai giữ tham chiếu tới chúng — `ToolNode` đã dựng xong, cach
   tên module — tên đó có thể đã bị người khác thay.
 - **Luôn chạy đủ bộ test.** Lỗi do ghép module không bao giờ lộ ra khi chạy riêng.
 
-### Phần chưa đạt (nói thẳng)
+### Không còn module patch nào
 
-Bốn module vẫn còn gán đè lúc import, `TECH_DEBT.md` mục 10 từng ghi là "đã trả hết" —
-không đúng. Danh sách đầy đủ và mức rủi ro từng cái nằm ở
-[`RA_SOAT_LO_HONG.md`](RA_SOAT_LO_HONG.md) mục 2. Một trong số đó (`api_phase_c_mount`)
-đã **không có tác dụng gì** suốt thời gian tồn tại, và cái không-có-tác-dụng đó là một lỗ
-hổng xác thực — nay đã sửa.
+Năm module từng gán đè hàm của module khác lúc import đã được xử lý hết. Bốn module tối ưu
+hiệu năng bị **xóa hẳn**, logic về thẳng hàm gốc:
+
+| Module đã xóa | Logic nay nằm ở |
+|---|---|
+| `agents_perf_patch.py` | `agents.py::_trimmed_messages` |
+| `qs_perf_patch.py` | `qs_tools.py::load_unit_prices` |
+| `cad_loader_perf_patch.py` | `cad_loader.py::load_drawing` |
+| `tools_lazy.py` | `tools.py::get_tools_for_role` |
+
+Module thứ năm (`api_phase_c_mount`) rút còn việc gắn router `/api/v1/auth` — phần nó cố
+làm thêm **chưa từng có tác dụng**, và cái không-có-tác-dụng đó là một lỗ hổng xác thực.
+
+Lợi ích không chỉ là gọn hơn: các tối ưu này trước đây chỉ có tác dụng với ai import
+`src.graph` trước, nghĩa là Celery worker và `python -m src.ingest` lặng lẽ chạy bản chưa
+tối ưu. Canh bằng `tests/test_no_import_patching.py`, chạy trong tiến trình con cố ý không
+nạp `src.graph`.
 
 ---
 
@@ -274,6 +288,9 @@ một dòng vào bảng này. Cảnh báo bị nuốt là lỗi nghiêm trọng,
 | Message trong hàng đợi Celery | Ai vào được Redis | `accept_content=['json']` — **không** pickle |
 | Code do LLM sinh | LLM | `execute_python_code` chạy trong sandbox hạn chế builtins |
 | Token/khóa API | Client HTTP | `require_api_key` — JWT hoặc API key |
+| Task của người khác | Người dùng đã xác thực | `task_owner.is_owner` — áp cho cả HTTP lẫn WebSocket |
+| Dung lượng upload | Client HTTP | Ghi theo khối, trần `MAX_UPLOAD_MB` (mặc định 200) |
+| Tần suất gọi | Client HTTP | `rate_limit.check` theo danh tính, áp cho endpoint tạo việc nặng |
 
 ### 7.2 Xác thực API — ba chế độ
 
@@ -298,16 +315,34 @@ không đặt được header tùy ý. WebSocket nhận `?api_key=` hoặc `?tok
 > **request thật** qua `TestClient` chứ không gọi hàm — vì lỗ hổng thuộc loại "hàm đúng
 > nhưng route không dùng nó".
 
-### 7.3 Giới hạn còn lại — nói rõ để không ai hiểu nhầm
+### 7.3 Quyền sở hữu tài nguyên
 
-- **Chưa có đa người dùng thật.** JWT hiện chỉ có một tài khoản bootstrap từ biến môi
-  trường (`verify_bootstrap_user`), không có CSDL người dùng, không phân quyền, không thu
-  hồi token.
-- **Chưa có quyền sở hữu tài nguyên.** Ai xác thực được là tải được BOQ của **bất kỳ**
-  `task_id` nào. Tham số `user_id` của `parse_cad_to_db_task` được nhận rồi bỏ đi.
-- **Chưa giới hạn tần suất** trên endpoint nào.
+Xác thực trả lời "anh là ai"; `src/task_owner.py` trả lời "cái này có phải của anh không".
+Chủ sở hữu được ghi ngay khi tạo task và kiểm tra ở `/api/v1/task/{id}`,
+`/api/v1/download/{id}` và **kênh WebSocket** — bỏ sót WebSocket là bịt cửa trước để ngỏ
+cửa sau, nó cũng là một đường đọc dữ liệu task.
 
-Ba điều này là cùng một việc chưa làm: đa người dùng (mục 6 của `TECH_DEBT.md`).
+Ba luật, theo thứ tự: hệ thống chỉ có **một** chủ thể (không xác thực, hoặc dùng khóa
+chung) → cho qua; có bản ghi → phải khớp; không có bản ghi mà đang chạy danh tính riêng →
+**từ chối** (fail-closed: người dùng chỉ cần chạy lại phân tích, còn cho qua thì không ai
+biết là đã cho qua).
+
+> **`MEP_AGENTS_API_KEY` là khóa cấp quản trị.** Khóa chung theo định nghĩa là *một* danh
+> tính dùng chung, nên ai cầm nó đọc được task của mọi người, kể cả của người dùng JWT.
+> Muốn tách người dùng thật thì dùng JWT và **không** phát khóa chung ra ngoài.
+
+### 7.4 Giới hạn còn lại — nói rõ để không ai hiểu nhầm
+
+- **Chưa có CSDL người dùng.** JWT hiện chỉ có một tài khoản bootstrap từ biến môi trường
+  (`verify_bootstrap_user`), không phân quyền theo vai trò, không thu hồi được token.
+- **Worker vẫn ghi vào thư mục chung** (`uploads/`, `data/boq/`) thay vì workspace riêng
+  từng người dùng.
+- **Giới hạn tần suất đếm trong RAM từng tiến trình.** Chạy nhiều worker uvicorn thì hạn
+  mức thực tế là `giới hạn × số worker`. Đây là chốt chặn chống lạm dụng vô ý, **không
+  phải** phòng thủ trước tấn công từ chối dịch vụ — thứ đó cần bộ đếm dùng chung hoặc chặn
+  ở tầng reverse proxy.
+
+Hai điều đầu là phần còn lại của việc đa người dùng (mục 6 của `TECH_DEBT.md`).
 
 ---
 
@@ -330,6 +365,8 @@ không sập**.
 | Chi phí token | `AGENT_MESSAGE_WINDOW` (24), `MAX_TOOL_RESULT_CHARS` (6000) | Mặc định như trong ngoặc |
 | Vòng lặp | `MAX_REVIEW_RETRIES` (2), `RECURSION_LIMIT` (25), `MAX_CAD_REVISIONS` (3) | Mặc định như trong ngoặc |
 | Bảo mật đường dẫn | `MEP_AGENTS_STRICT_PATHS` | Tắt — giữ kịch bản plugin cùng máy |
+| Hạn mức tài nguyên | `MAX_UPLOAD_MB` (200), `RATE_LIMIT_REQUESTS` (60), `RATE_LIMIT_WINDOW_SECONDS` (60), `TASK_OWNER_TTL` (7 ngày) | Mặc định như trong ngoặc; `RATE_LIMIT_REQUESTS=0` để tắt |
+| Mật khẩu Redis | `REDIS_PASSWORD` | Không đặt thì kết nối không mật khẩu (dev). **Compose bắt buộc đặt** — thiếu là dừng, không chạy tiếp |
 | Beta Anthropic | `ANTHROPIC_TOOL_SEARCH` | Tắt |
 
 **Ràng buộc:** một cấu hình đọc từ hai nơi bằng hai tên khác nhau là lỗi. `OLLAMA_BASE_URL`
@@ -351,6 +388,7 @@ mình.
 | Cache DXF | `cad_cache.py` | Không đọc lại cùng một file |
 | Cache bảng đơn giá | `unit_price_cache.py` | Không đọc lại CSV |
 | Chạy song song M/E/P/F | `supervisor_parallel.py` + LangGraph `Send` | Bốn bộ phận độc lập chạy cùng lúc |
+| Đẩy tiến độ qua Pub/Sub | `task_events.py` | WebSocket ngồi nghe thay vì hỏi Celery backend mỗi giây cho mỗi kết nối |
 
 Prompt caching chỉ bật khi prompt ≥ 4000 ký tự (`ANTHROPIC_CACHE_MIN_CHARS`): dưới ngưỡng
 Anthropic bỏ qua cache **trong im lặng**, bật lên chỉ tạo cảm giác đã tiết kiệm.
@@ -359,7 +397,7 @@ Anthropic bỏ qua cache **trong im lặng**, bật lên chỉ tạo cảm giác
 
 ## 10. Bản đồ kiểm thử
 
-617 test trong 59 file. Nhóm theo thứ nó bảo vệ:
+654 test trong 62 file. Nhóm theo thứ nó bảo vệ:
 
 | Nhóm | File tiêu biểu | Bảo vệ điều gì |
 |---|---|---|
@@ -369,6 +407,9 @@ Anthropic bỏ qua cache **trong im lặng**, bật lên chỉ tạo cảm giác
 | Sandbox | `test_execute_python_code_sandbox.py` | Code LLM sinh không thoát ra được |
 | Xác thực API | `test_api_auth.py`, `test_api.py` | 401 khi phải 401 — **qua request thật** |
 | Chốt chặn bảo mật | `test_hardening.py` | Pickle, dò đường dẫn, phạm vi tool theo vai trò |
+| Quyền sở hữu & hạn mức | `test_ownership_and_limits.py` | Không đọc được task của người khác; trần upload; giới hạn tần suất |
+| Không patch lúc import | `test_no_import_patching.py` | Tối ưu có tác dụng mà không cần nạp `src.graph`; danh tính hàm không đổi |
+| Kênh đẩy tiến độ | `test_task_events.py` | Pub/Sub chạy đúng **và** đường polling dự phòng còn nguyên |
 | Kiến trúc | `test_no_import_cycles.py`, `test_registry_consolidation.py`, `test_supervisor_pipeline.py`, `test_standards_backend.py` | Điểm nối không bị lách |
 | Vòng lặp điều phối | `test_review_retry_loop.py`, `test_routing.py`, `test_graph.py` | Không lặp vô tận, không auto-pass |
 | E2E | `test_e2e_takeoff.py` + `web/tests-ui/` (Playwright) | Luồng thật đầu-cuối |

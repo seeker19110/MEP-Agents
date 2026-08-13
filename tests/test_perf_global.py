@@ -44,7 +44,6 @@ def test_xref_resolution_survives_readfile_being_patched_to_the_cache(tmp_path):
     2. Việc gộp xref KHÔNG được đụng vào biến toàn cục `ezdxf.readfile` — Phase D chạy
        song song bằng thread, gán đè là không an toàn (xem test thread bên dưới)."""
     import ezdxf
-    import src.cad_loader_perf_patch  # noqa: F401 - áp patch
     from src import cad_cache, cad_loader
 
     cad_cache.invalidate()
@@ -81,7 +80,6 @@ def test_xref_resolution_never_mutates_global_readfile(tmp_path):
     lúc lời gọi đang chạy. Kiểm bằng cách chạy đua nhiều luồng thì không chắc chắn — lỗi
     chỉ lộ khi các luồng gối nhau đúng nhịp."""
     import ezdxf
-    import src.cad_loader_perf_patch  # noqa: F401 - áp patch
     from src import cad_cache, cad_loader
 
     cad_cache.invalidate()
