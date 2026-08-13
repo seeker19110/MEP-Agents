@@ -44,6 +44,66 @@ def _norm(text: str) -> str:
     return " ".join(_strip_accents(text).lower().replace("_", " ").split())
 
 
+#: Quá bao nhiêu ngày thì coi bảng đơn giá là cũ. Giá vật tư/nhân công xây dựng ở Việt
+#: Nam biến động theo quý, nên mặc định nửa năm. Đổi bằng `UNIT_PRICE_MAX_AGE_DAYS`.
+DEFAULT_UNIT_PRICE_MAX_AGE_DAYS = 180
+
+
+def unit_price_effective_date(meta_path: str = None) -> tuple[str, dict]:
+    """Ngày hiệu lực do người cập nhật KHAI BÁO trong `data/unit_prices.meta.json`.
+
+    Cố ý KHÔNG dùng thời gian sửa file: `git clone` đặt lại mtime của mọi file thành thời
+    điểm clone, nên một bảng giá ba năm trước sẽ trông như vừa cập nhật hôm nay — đúng
+    kiểu sai lệch âm thầm mà dự án này phải tránh.
+    """
+    import json
+
+    path = meta_path or os.path.join(get_project_root(), "data", "unit_prices.meta.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return "", {}
+    return str(meta.get("ngay_hieu_luc") or "").strip(), meta
+
+
+def unit_price_freshness_note(meta_path: str = None) -> str:
+    """Một dòng cảnh báo nếu bảng đơn giá đã cũ hoặc không rõ ngày hiệu lực; "" nếu ổn.
+
+    Đầu ra của bộ phận QS là CON SỐ TIỀN đi vào hồ sơ thầu. Một bảng giá cũ vẫn cho ra
+    bảng dự toán trông hoàn chỉnh, không có dấu hiệu gì — nguy hiểm hơn nhiều so với một
+    cảnh báo lộ liễu (nguyên tắc số 2 của dự án).
+    """
+    from datetime import date, datetime
+
+    try:
+        max_age = int(os.environ.get("UNIT_PRICE_MAX_AGE_DAYS", DEFAULT_UNIT_PRICE_MAX_AGE_DAYS))
+    except ValueError:
+        max_age = DEFAULT_UNIT_PRICE_MAX_AGE_DAYS
+    if max_age <= 0:
+        return ""
+
+    ngay, meta = unit_price_effective_date(meta_path)
+    if not ngay:
+        return ("- CẢNH BÁO ĐƠN GIÁ: bảng giá KHÔNG khai báo ngày hiệu lực "
+                "(`data/unit_prices.meta.json`) — không biết con số dự toán dựa trên mặt "
+                "bằng giá thời điểm nào. Hãy khai báo trước khi dùng cho hồ sơ thật.")
+    try:
+        hieu_luc = datetime.strptime(ngay, "%Y-%m-%d").date()
+    except ValueError:
+        return (f"- CẢNH BÁO ĐƠN GIÁ: ngày hiệu lực '{ngay}' không đúng định dạng YYYY-MM-DD "
+                f"trong `data/unit_prices.meta.json`.")
+
+    tuoi = (date.today() - hieu_luc).days
+    if tuoi > max_age:
+        nguon = str(meta.get("nguon") or "").strip()
+        return (f"- CẢNH BÁO ĐƠN GIÁ: bảng giá có hiệu lực từ {ngay}, đã {tuoi} ngày "
+                f"(ngưỡng {max_age}). Giá vật tư/nhân công biến động theo quý — hãy cập nhật "
+                f"`data/unit_prices.csv` trước khi dùng con số này cho hồ sơ thầu."
+                + (f" Nguồn hiện tại: {nguon}." if nguon else ""))
+    return ""
+
+
 def load_unit_prices(csv_path: str = None) -> pl.DataFrame:
     """Nạp bảng đơn giá. Đọc từ project root (tài nguyên dùng chung), không phải
     workspace của phiên — mọi phiên tra cùng một bảng giá.
@@ -278,6 +338,11 @@ def calc_boq_cost(takeoff_excel_path: str, output_excel_path: str = "du_toan_chi
         report = [
             f"LẬP DỰ TOÁN CHI PHÍ THÀNH CÔNG — đã ghi file Excel: {out_path}",
             f"- Số hạng mục: {len(rows)} (tra được đơn giá: {len(rows) - len(missing)})",
+        ]
+        freshness = unit_price_freshness_note()
+        if freshness:
+            report.append(freshness)
+        report += [
             "",
             "TỔNG HỢP GIÁ TRỊ DỰ TOÁN:",
         ]

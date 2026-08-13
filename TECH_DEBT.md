@@ -14,7 +14,9 @@ Trạng thái tổng thể và số liệu hiện hành nằm ở [`docs/TIEN_DO
 | 4 | Real-time (WebSocket) | 🟡 Trung bình | Đã làm 1 phần |
 | 8 | Plugin/Web hardcode địa chỉ server | 🟡 Trung bình | ✅ Đã trả (Revit/AutoCAD/Web đều hết hardcode) |
 | 5 | Computer Vision (YOLO cho bản vẽ rác) | 🟡 Trung bình | Đã làm 1 phần — cần dữ liệu gán nhãn thật |
-| 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | ✅ E2E đã có và **đã chạy đạt với hạ tầng thật** (Redis + worker rời + FastAPI); Revit/AutoCAD vẫn chưa |
+| 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | ✅ E2E (hạ tầng thật) + test UI Playwright đều đã chạy đạt; Revit/AutoCAD vẫn chưa |
+| 11 | Bảng đơn giá cũ mà không ai cảnh báo | 🟠 Cao | ✅ Đã trả — xem mục 11 |
+| 12 | Vòng lặp import giữa `tools.py` và `qs_tools.py` | 🟢 Thấp | Chưa làm — xem mục 12 |
 | 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm — cần phần cứng thật |
 | 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Chưa làm — cần tài khoản cổng thanh toán thật |
 | 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | ✅ Đã trả — không còn chỗ nào gán đè hàm/tool; xem mục 10 |
@@ -173,7 +175,9 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
   FastAPI thật — tải lên → worker nhặt task qua Redis → Excel 5.582 byte → tải về, tổng
   chiều dài khớp hình học. Đường xác thực `MEP_AGENTS_API_KEY` cũng đã kiểm (thiếu khóa →
   401, có khóa → đạt). **Vẫn chưa chạy qua `docker compose up --build`** — xem mục 3.
-  Chưa có test UI (Playwright/Cypress) cho `web/`.
+  ✅ **Đã có test UI cho `web/`** (bổ sung cùng ngày): 7 kịch bản Playwright chạy trên
+  Chromium thật, gồm trọn đường thả bản vẽ → phân tích → WebSocket → tải Excel. Xem
+  [`docs/E2E.md`](docs/E2E.md) tầng 3.
 - **Bối cảnh cũ:** test hiện tại (`tests/*.py`, 551 test) đều là
   unit/integration test ở mức module Python, mock Celery/Redis. Chưa có kịch bản test
   chạy thật: upload file CAD thật → Celery worker thật (Redis thật) → nhận kết quả Excel
@@ -253,3 +257,33 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
     một tầng đăng ký cho hai chỗ này là thêm phức tạp mà không đổi được rủi ro.
   - Bắt buộc chạy `uv run pytest -q` **đủ bộ** trước khi hợp nhất mọi PR, không chỉ test
     của Phase đang làm.
+
+
+## 11. Bảng đơn giá cũ mà không ai cảnh báo ✅ Đã trả
+
+- **Rủi ro (nghiệp vụ, không phải kỹ thuật):** đầu ra của bộ phận QS là **con số tiền đi
+  vào hồ sơ thầu**. `data/unit_prices.csv` quyết định con số đó, nhưng trước đây không có
+  cơ chế nào cho biết bảng giá cập nhật lần cuối bao giờ. Một bảng giá ba năm trước vẫn
+  cho ra bảng dự toán trông hoàn chỉnh, đủ đầu mục, không một dấu hiệu nào — vi phạm đúng
+  nguyên tắc số 2 của dự án ("không bỏ sót âm thầm"), ở chỗ tốn kém nhất.
+- **Đã làm:** thêm `data/unit_prices.meta.json` khai báo `ngay_hieu_luc` + `nguon`, và
+  `unit_price_freshness_note()` trong `src/qs_tools.py`. Quá `UNIT_PRICE_MAX_AGE_DAYS`
+  (mặc định 180 ngày) thì **chính báo cáo dự toán** mang theo dòng cảnh báo — để trong log
+  thì không ai đọc. Không khai báo ngày, hoặc ngày sai định dạng, cũng bị nói ra.
+- **Vì sao không dùng thời gian sửa file:** `git clone` đặt lại mtime của mọi file thành
+  thời điểm clone, nên bảng giá cũ sẽ trông như vừa cập nhật hôm nay — chính xác là kiểu
+  sai lệch âm thầm cần tránh. Ngày hiệu lực phải do người cập nhật khai báo.
+- **Còn lại:** đơn giá trong repo vẫn là **giá tham khảo nội bộ, chưa đối chiếu công bố
+  giá của Sở Xây dựng**, và chưa phân theo vùng. Đây là việc của người có số liệu thật.
+
+## 12. Vòng lặp import giữa `tools.py` và `qs_tools.py` 🟢 Chưa làm
+
+- **Hiện trạng:** `import src.qs_tools` **trực tiếp** (không qua `src.tools` trước) thì vỡ
+  với `ImportError ... partially initialized module`: `qs_tools` import
+  `tools.normalize_mepf_parameter_spec` ở cuối file, còn `tools` lại import ngược một loạt
+  tool từ `qs_tools`.
+- **Vì sao chưa vỡ trong thực tế:** mọi đường vào hệ thống (`graph.py`, `api.py`,
+  `celery_app.py`) đều chạm `src.tools` trước, nên vòng lặp luôn được gỡ đúng thứ tự.
+- **Vì sao chưa sửa:** gỡ vòng lặp trong một module 1.600 dòng là tái cấu trúc thật sự
+  (tách phần dùng chung ra module thứ ba), rủi ro cao hơn hẳn lợi ích khi chưa có ai gặp
+  lỗi này ngoài test. Ghi lại để người sau không mất thời gian chẩn đoán từ đầu.

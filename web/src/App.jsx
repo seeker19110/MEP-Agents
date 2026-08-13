@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UploadCloud, File, CheckCircle, Activity, Box, DownloadCloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
@@ -18,18 +18,35 @@ const authHeaders = API_KEY ? { 'X-API-Key': API_KEY } : {};
 
 function App() {
   const [file, setFile] = useState(null);
+  // Vùng kéo-thả mời "hoặc click để chọn file" nhưng trước đây KHÔNG có input file nào,
+  // nên cú bấm rơi vào hư không: không mở hộp chọn file, cũng không báo lỗi gì. Người
+  // dùng máy bàn quen bấm hơn kéo thả sẽ tưởng ứng dụng hỏng.
+  const fileInputRef = useRef(null);
   const [isUploading, setIsUploading] = useState(false);
   const [taskId, setTaskId] = useState(null);
   const [logs, setLogs] = useState([]);
   const [taskStatus, setTaskStatus] = useState('');
 
+  const isCadFile = (f) => !!f && (f.name.endsWith('.dwg') || f.name.endsWith('.dxf'));
+
   const handleDrop = (e) => {
     e.preventDefault();
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && (droppedFile.name.endsWith('.dwg') || droppedFile.name.endsWith('.dxf'))) {
+    if (isCadFile(droppedFile)) {
       setFile(droppedFile);
     }
   };
+
+  const handlePick = (e) => {
+    const picked = e.target.files && e.target.files[0];
+    if (isCadFile(picked)) {
+      setFile(picked);
+    }
+    // Xóa giá trị để chọn LẠI đúng file vừa chọn vẫn kích hoạt onChange.
+    e.target.value = '';
+  };
+
+  const openFileDialog = () => fileInputRef.current?.click();
 
   const handleUpload = async () => {
     if (!file) return;
@@ -126,16 +143,25 @@ function App() {
             <h2 className="text-2xl font-semibold mb-2">Auto Quantity Takeoff</h2>
             <p className="text-slate-400 mb-8">Kéo thả bản vẽ CAD (DWG/DXF) để Bầy đàn AI tự động xử lý.</p>
             
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".dwg,.dxf"
+              onChange={handlePick}
+              className="hidden"
+              data-testid="file-input"
+            />
             <div 
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
+              onClick={openFileDialog}
               className={`border-2 border-dashed rounded-xl p-12 flex flex-col items-center justify-center transition-all ${file ? 'border-cyan-500 bg-cyan-500/10' : 'border-slate-700 hover:border-cyan-500/50 hover:bg-slate-800/50'}`}
             >
               {file ? (
                 <motion.div initial={{scale:0.9}} animate={{scale:1}} className="flex flex-col items-center gap-4">
                   <File className="w-16 h-16 text-cyan-400" />
                   <span className="font-medium text-lg">{file.name}</span>
-                  <button onClick={handleUpload} disabled={isUploading} className="mt-4 px-6 py-2.5 bg-cyan-600 hover:bg-cyan-500 rounded-lg font-semibold transition-colors disabled:opacity-50 flex items-center gap-2">
+                  <button onClick={(e) => { e.stopPropagation(); handleUpload(); }} disabled={isUploading} className="mt-4 px-6 py-2.5 bg-cyan-600 hover:bg-cyan-500 rounded-lg font-semibold transition-colors disabled:opacity-50 flex items-center gap-2">
                     {isUploading ? 'Đang xử lý...' : 'Phân tích bản vẽ'}
                   </button>
                 </motion.div>
@@ -143,7 +169,13 @@ function App() {
                 <div className="flex flex-col items-center gap-4 text-slate-400">
                   <UploadCloud className="w-16 h-16 opacity-50" />
                   <span className="font-medium">Kéo thả file CAD vào đây</span>
-                  <span className="text-sm">hoặc click để chọn file</span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); openFileDialog(); }}
+                    className="text-sm underline underline-offset-4 hover:text-cyan-400 transition-colors"
+                  >
+                    hoặc click để chọn file
+                  </button>
                 </div>
               )}
             </div>
