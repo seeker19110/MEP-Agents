@@ -25,8 +25,10 @@ Reviewer kiểm duyệt đầu ra.
   (API), Celery + Redis (task nền), React/Vite (`web/`)
 - **Quản lý phụ thuộc:** `uv` (khoá trong `uv.lock`, nhóm phụ nằm ở `[project.optional-dependencies]`)
 - **Test:** `pytest` — hiện **600 test**, tất cả phải xanh. Có thêm E2E, xem [`docs/E2E.md`](docs/E2E.md)
-- **Kiến trúc:** xem [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md) để nắm trạng thái
-  hiện tại, [`TECH_DEBT.md`](TECH_DEBT.md) để biết cái gì còn nợ và **vì sao chưa trả**
+- **Kiến trúc:** [`docs/DAC_TA_HE_THONG.md`](docs/DAC_TA_HE_THONG.md) là đặc tả đầy đủ —
+  đọc trước khi sửa gì đáng kể. [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md) cho trạng
+  thái hiện tại, [`TECH_DEBT.md`](TECH_DEBT.md) cho cái gì còn nợ và **vì sao chưa trả**,
+  [`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md) cho lỗ hổng đã biết
 
 ### Nguyên tắc riêng của dự án này
 
@@ -41,6 +43,12 @@ Reviewer kiểm duyệt đầu ra.
 4. **Graceful fallback.** Thiếu API key, thiếu Redis, thiếu Postgres → rơi về đường cục bộ
    kèm log cảnh báo, không sập.
 5. **Sửa CAD phải lưu revision trước khi ghi đè** (`src/cad_revision.py`).
+6. **Logic xác thực nằm trong `src/api.py`, không gắn từ ngoài vào.** FastAPI chốt
+   `Depends(...)` vào route ngay lúc định nghĩa route — gán đè `api.require_api_key` từ
+   module khác **không đổi được route nào**. Việc này đã từng làm API mở toang suốt nhiều
+   PR. Test xác thực phải gửi request thật qua `TestClient`, không gọi hàm.
+7. **Vai trò có node trong graph phải có entry trong `TOOLS_BY_ROLE`.** Rơi vào nhánh mặc
+   định là im lặng nhận đủ 90 tool — sai quyền và đắt, mà không có cảnh báo nào.
 
 ## Lệnh thường dùng
 

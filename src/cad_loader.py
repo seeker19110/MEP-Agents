@@ -22,7 +22,7 @@ import tempfile
 
 import ezdxf
 
-from src import cad_geometry
+from src import cad_cache, cad_geometry
 from src.workspace import resolve_safe_path
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,12 @@ def load_drawing(file_path: str):
 
     `.dwg` được tự chuyển sang `.dxf` (đặt cạnh file gốc trong workspace để tái sử dụng
     cho các lần gọi tool sau, khỏi convert lại).
+
+    Đọc qua `cad_cache.readfile_cached` (cache theo đường dẫn + mtime + kích thước) nên
+    nhiều tool đọc cùng một bản vẽ trong một lượt chỉ tốn một lần parse. Cache nằm THẲNG
+    ở đây thay vì được gắn thêm từ ngoài lúc import: `cad_loader_perf_patch` cũ gán đè
+    chính hàm này, nên ai `from src.cad_loader import load_drawing` trước khi patch chạy
+    thì cầm bản không cache mà không có dấu hiệu gì.
     """
     safe_path = resolve_safe_path(file_path)
     notes = []
@@ -111,9 +117,12 @@ def load_drawing(file_path: str):
             if os.path.abspath(produced) != os.path.abspath(converted):
                 shutil.move(produced, converted)
             notes.append(f"Đã tự chuyển .dwg sang .dxf: {os.path.basename(converted)}")
+            # File .dxf vừa bị ghi đè — bỏ bản cũ trong cache, nếu không lần đọc sau vẫn
+            # nhận nội dung của bản vẽ trước khi convert.
+            cad_cache.invalidate(converted)
         safe_path = converted
 
-    return ezdxf.readfile(safe_path), notes
+    return cad_cache.readfile_cached(safe_path), notes
 
 
 def list_xrefs(doc):
@@ -145,11 +154,13 @@ def resolve_xref_segments(doc, base_dir: str, collect_segments_fn, readfile=None
     `notes` — người dùng phải biết bản vẽ còn thiếu phần nào, thay vì nhận một con số
     khối lượng thiếu mà tưởng là đủ.
 
-    `readfile` cho phép truyền hàm đọc DXF khác (VD bản có cache). Truyền tham số như
-    thế này thay vì gán đè `ezdxf.readfile` là cố ý: gán đè biến toàn cục không an toàn
-    khi chạy nhiều luồng — hai lời gọi chồng nhau sẽ khôi phục nhầm của nhau.
+    `readfile` cho phép truyền hàm đọc DXF khác; mặc định là bản có cache. Truyền tham số
+    như thế này thay vì gán đè `ezdxf.readfile` là cố ý: gán đè biến toàn cục không an
+    toàn khi chạy nhiều luồng — hai lời gọi chồng nhau sẽ khôi phục nhầm của nhau, khiến
+    `ezdxf.readfile` kẹt vĩnh viễn ở bản cache và mọi chỗ đọc DXF sau đó nhận về cùng một
+    doc dùng chung. Xem `tests/test_perf_global.py`.
     """
-    read = readfile or ezdxf.readfile
+    read = readfile or cad_cache.readfile_cached
     segments, notes = [], []
     xref_defs = {name: path for name, path in list_xrefs(doc)}
     if not xref_defs:

@@ -16,11 +16,15 @@ from src.agents import (
 import src.agents_phase_a_patch  # noqa: F401
 import src.agents_phase_b_patch  # noqa: F401
 import src.vector_search_bind  # noqa: F401
-import src.cad_loader_perf_patch  # noqa: F401
-import src.agents_perf_patch  # noqa: F401
-import src.qs_perf_patch  # noqa: F401
 import src.agents_phase_d_patch  # noqa: F401
-import src.tools_lazy  # noqa: F401
+
+# Bốn module patch hiệu năng (`cad_loader_perf_patch`, `agents_perf_patch`,
+# `qs_perf_patch`, `tools_lazy`) đã bị XÓA — logic của chúng nay nằm thẳng trong hàm gốc:
+# cache DXF trong `cad_loader.load_drawing`, cắt message trong `agents.call_mepf_agent`,
+# cache đơn giá trong `qs_tools.load_unit_prices`, cache tool theo vai trò trong
+# `tools.get_tools_for_role`. Nhờ vậy các tối ưu này có tác dụng với MỌI người gọi, kể cả
+# ai import hàm trước khi `src.graph` được nạp (Celery worker, `python -m src.ingest`,
+# test gọi thẳng module). Xem TECH_DEBT.md mục 10.
 
 # Trước đây phải đọc lại `_agents_mod.supervisor_node` SAU các dòng import trên, vì Phase
 # B/D gán đè hàm đó lúc import — bản `supervisor_node` lấy ở dòng `from src.agents import`

@@ -232,8 +232,31 @@ def agent_node_key(agent_name: str) -> str:
     return name.lower()
 
 
+def _trimmed_messages(state: AgentState, agent_name: str):
+    """Lịch sử hội thoại đã cắt bớt trước khi đưa vào LLM.
+
+    Giữ `agent_message_window` message gần nhất và cắt ngắn kết quả tool quá dài — chi
+    phí token của một lượt tỉ lệ thuận với chỗ này. Cắt hỏng thì dùng nguyên bản: đắt hơn
+    vẫn tốt hơn là làm vỡ cả lượt làm việc.
+
+    Nằm THẲNG ở đây thay vì được gắn thêm từ ngoài lúc import: `agents_perf_patch` cũ gán
+    đè `call_mepf_agent`, nên ai giữ tham chiếu hàm này từ trước (`from src.agents import
+    call_mepf_agent`) sẽ gọi bản không cắt mà không có dấu hiệu gì.
+    """
+    raw = state.get("messages", []) if isinstance(state, dict) else []
+    try:
+        from src.perf_tuning import trim_messages_for_llm
+        trimmed = trim_messages_for_llm(raw)
+    except Exception as e:
+        logger.debug("[perf] bỏ qua bước cắt message: %s", e)
+        return raw
+    if len(trimmed) != len(raw):
+        logger.debug("[perf] %s messages %s → %s", agent_name, len(raw), len(trimmed))
+    return trimmed
+
+
 def call_mepf_agent(state: AgentState, system_prompt: str, agent_name: str):
-    messages = state.get("messages", [])
+    messages = _trimmed_messages(state, agent_name)
     errors = state.get("errors", [])
 
     error_note = ""

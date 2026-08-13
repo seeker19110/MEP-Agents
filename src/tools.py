@@ -14,6 +14,7 @@ import re
 import ast
 import operator as op
 import logging
+import threading
 from functools import lru_cache
 from src.workspace import resolve_safe_path, get_project_root
 from src.cad_revision import create_snapshot
@@ -1670,9 +1671,69 @@ TOOLS_BY_ROLE = {
         diff_cad_revisions, list_cad_revisions, convert_dwg_to_dxf, audit_cad_drawing_errors,
         render_cad_image, detect_cad_symbols_yolo,
     ] + _PHASE_B_QS_TOOLS,
+    # QS Auditor CHỈ được kiểm toán, prompt của nó nói rõ "không được phép tính lại từ
+    # đầu". Trước đây vai trò này không có mặt trong bảng nên rơi vào nhánh mặc định và
+    # nhận TOÀN BỘ 90 tool — gồm cả `edit_cad`, `write_cad`, `execute_python_code`. Vừa
+    # trái với nhiệm vụ của nó (kiểm toán viên tự sửa bài mình đang chấm), vừa nhồi
+    # schema của 90 tool vào mỗi request. Bộ dưới đây là đủ để đọc và đối chiếu.
+    "qs_auditor": _COMMON_TOOLS + [
+        read_cad, analyze_cad_spatial_context, lookup_unit_price,
+    ] + _PHASE_B_QS_TOOLS,
 }
+
+#: Bí danh vai trò → khóa trong `TOOLS_BY_ROLE`. `call_mepf_agent` rút tên vai trò từ tên
+#: node ("QSAuditor"), không phải lúc nào cũng trùng khóa viết theo kiểu snake_case.
+ROLE_ALIASES = {
+    "qsauditor": "qs_auditor",
+}
+
+
+_ROLE_CACHE_LOCK = threading.Lock()
+_ROLE_CACHE: dict[str, list] = {}
+
+
+def clear_role_tools_cache() -> None:
+    """Xóa cache tool theo vai trò. **Phải gọi sau khi thay đổi `TOOLS_BY_ROLE`.**
+
+    Module `tools_lazy` cũ có hàm cùng tên nhưng không ai gọi, nên cache chỉ có đường vào
+    mà không có đường ra: đăng ký tool mới lúc chạy thì vai trò nào đã được hỏi trước đó
+    sẽ mãi nhận danh sách cũ — im lặng, không cảnh báo.
+    """
+    with _ROLE_CACHE_LOCK:
+        _ROLE_CACHE.clear()
+
+
+def register_role_tool(role: str, tool_obj) -> None:
+    """Thêm một tool cho một vai trò lúc chạy, có xóa cache đi kèm.
+
+    Đây là đường ĐÚNG để mở rộng bộ tool ngoài lúc import. Sửa thẳng `TOOLS_BY_ROLE` mà
+    quên `clear_role_tools_cache()` thì thay đổi không có tác dụng với vai trò đã dùng.
+    """
+    key = (role or "").lower().strip()
+    key = ROLE_ALIASES.get(key, key)
+    bucket = TOOLS_BY_ROLE.setdefault(key, list(_COMMON_TOOLS))
+    if tool_obj not in bucket:
+        bucket.append(tool_obj)
+    if tool_obj not in tools:
+        tools.append(tool_obj)
+    clear_role_tools_cache()
+
 
 def get_tools_for_role(role: str) -> list:
     """Tool set thu gọn cho một vai trò cụ thể; vai trò không xác định (VD: Supervisor
-    gọi nhầm) sẽ nhận về toàn bộ `tools` để không bao giờ thiếu tool cần thiết."""
-    return TOOLS_BY_ROLE.get((role or "").lower().strip(), tools)
+    gọi nhầm) sẽ nhận về toàn bộ `tools` để không bao giờ thiếu tool cần thiết.
+
+    Kết quả được cache theo vai trò và trả về BẢN SAO — người gọi có sửa danh sách nhận
+    được (VD `agents.build_tools_for_llm` thêm `replace_blocks_by_mapping`) cũng không
+    làm hỏng bản trong cache của lượt sau.
+    """
+    key = (role or "").lower().strip()
+    key = ROLE_ALIASES.get(key, key)
+    with _ROLE_CACHE_LOCK:
+        hit = _ROLE_CACHE.get(key)
+        if hit is not None:
+            return list(hit)
+    resolved = list(TOOLS_BY_ROLE.get(key, tools))
+    with _ROLE_CACHE_LOCK:
+        _ROLE_CACHE[key] = resolved
+    return list(resolved)
