@@ -22,11 +22,16 @@ def test_rrf_hybrid_keyword_only(monkeypatch):
 
 
 def test_tools_lazy_cache():
+    """Cache nằm ở bản `get_tools_for_role` đã được patch trong `src.tools` — trước đây
+    test này gọi `get_tools_for_role_cached()`, một hàm song song không ai dùng thật."""
+    import src.tools as tools_mod
     import src.tools_lazy as tl
+
     tl.clear_role_tools_cache()
-    a = tl.get_tools_for_role_cached("electrical")
-    b = tl.get_tools_for_role_cached("electrical")
+    a = tools_mod.get_tools_for_role("electrical")
+    b = tools_mod.get_tools_for_role("electrical")
     assert len(a) == len(b) and len(a) > 0
+    assert tl._ROLE_CACHE.get("electrical") is not None
 
 
 def test_embedding_backend_name_runs(monkeypatch):

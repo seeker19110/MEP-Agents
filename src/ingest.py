@@ -30,10 +30,19 @@ def main():
         print("Không có tài liệu nào trong data/standards — bỏ qua bước nạp vector.")
         return
     print(f"Loaded {len(docs)} chunks from data/standards")
+    # Không còn chặn cứng ở OPENAI_API_KEY: từ Phase D dự án hỗ trợ embedding qua Ollama
+    # hoặc sentence-transformers chạy cục bộ, nhưng chỗ này vẫn thoát sớm nên chạy offline
+    # là không nạp được index — hybrid mất hẳn nhánh vector mà không ai biết vì sao.
+    from src.local_embeddings import embedding_backend_name
+
+    backend_name = embedding_backend_name()
     api_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key == "dummy_key_to_prevent_crash_on_import":
+    has_key = bool(api_key) and api_key != "dummy_key_to_prevent_crash_on_import"
+    if backend_name == "openai" and not has_key:
         print("LỖI: Chưa cấu hình OPENAI_API_KEY trong .env.")
+        print("     Hoặc đặt EMBEDDING_BACKEND=ollama|local để nạp mà không cần API key.")
         return
+    print(f"Nguồn embedding: {backend_name}")
     from src.vectorstore import build_or_load_vectorstore, use_pgvector, ensure_pgvector_hnsw_index
     build_or_load_vectorstore(docs)
     backend = "pgvector" if use_pgvector() else "FAISS"

@@ -198,12 +198,28 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
      ghép tay danh sách nữa. Bộ tool của mọi vai trò **không đổi** — đã đối chiếu số lượng
      trước/sau và kiểm tra không có tool trùng tên
      (`tests/test_registry_consolidation.py`).
-- **Còn lại:**
-  - Gộp nốt phần Phase C/D vào registry — khó hơn vì chúng thay thế hành vi
-    (`search_standards` bản hybrid, nguồn embedding) chứ không chỉ thêm tool. Cần thiết kế
-    điểm mở rộng đàng hoàng thay vì swap module attribute.
-  - `src/tools_lazy.py` có `get_tools_for_role_cached()` **không ai gọi** (trùng chức năng
-    với bản patch `patch_get_tools_for_role`), chỉ còn test của chính nó. Nên xóa khi đụng
-    tới file này lần sau.
+- **Đã làm (đợt 3):**
+  5. ✅ **Phase C/D thôi tráo đối tượng tool.** Thêm `src/standards_backend.py` làm điểm
+     mở rộng: backend đăng ký theo mức ưu tiên (`hybrid` 20 > `vectorstore` 10 > tra từ
+     khóa offline), backend lỗi hoặc rỗng thì tự nhường xuống đường dưới. `search_standards`
+     giữ nguyên danh tính suốt vòng đời tiến trình — không còn cảnh ai đã sao chép danh
+     sách tool từ trước thì cầm nhầm bản cũ, và thêm chỗ chứa tool mới trong `tools.py`
+     không còn buộc phải nhớ sửa hàm `_swap` ở hai module patch.
+  6. ✅ **Nguồn embedding vào thẳng `vectorstore.get_embeddings`**, bỏ `_patch_embeddings`
+     của Phase D. Việc này sửa một lỗi thật đi kèm: `python -m src.ingest` không import
+     `src.graph` nên patch không chạy, `get_embeddings` kẹt ở đường OpenAI. Cộng với việc
+     `ingest.main()` chặn cứng ở `OPENAI_API_KEY`, hệ quả là **chạy offline không nạp được
+     index** — hybrid mất hẳn nhánh vector mà không có dấu hiệu gì. Nay chỉ chặn khi nguồn
+     embedding thực sự là `openai`.
+  7. ✅ Xóa `get_tools_for_role_cached()` trong `src/tools_lazy.py` (không ai gọi).
+- **Còn lại (chưa làm, có chủ đích):**
+  - **Phần patch bọc node của graph vẫn còn**: `agents_phase_a_patch`/`agents_phase_b_patch`
+    (mở rộng `DELIVERABLE_TOOLS`, bọc `supervisor_node` cho HIL + hàng đợi) và
+    `_patch_supervisor_parallel` của Phase D. Đây là bọc **hành vi của node**, không phải
+    đăng ký tool, nên không dùng được kiểu registry vừa làm. Gỡ chúng đòi tái cấu trúc
+    `agents.py`/`graph.py` thành các bước có điểm nối sẵn (middleware/hook) — việc lớn,
+    nên làm riêng một PR có test bao đủ luồng supervisor trước khi động vào.
+  - `agents_perf_patch` (cắt bớt message) và `qs_perf_patch` (cache đơn giá) vẫn là patch
+    lúc import. Rủi ro thấp (bọc thuần túy, không đổi dữ liệu), để lại cũng được.
   - Bắt buộc chạy `uv run pytest -q` **đủ bộ** trước khi hợp nhất mọi PR, không chỉ test
     của Phase đang làm.

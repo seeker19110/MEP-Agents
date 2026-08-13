@@ -21,18 +21,59 @@
 trong `try/except` riêng — một phần hỏng thì chỉ phần đó bị bỏ qua kèm cảnh báo log, hệ
 thống vẫn chạy bằng đường cũ.
 
-## Cấu hình
+## Cấu hình tìm kiếm lai
+
+Hybrid **mặc định đã bật** (`hybrid_search: bool = True` trong `src/config.py`), tắt bằng
+`HYBRID_SEARCH=false`. Nó gộp hai nhánh bằng RRF:
+
+| Nhánh | Cần gì | Thiếu thì |
+|---|---|---|
+| Từ khóa | thư mục `STANDARDS_DIR` (mặc định `data/standards`) có file `.txt` | nhánh này không ra kết quả |
+| Vector | nguồn embedding + index đã nạp | tự rơi về nhánh từ khóa |
+
+Nhánh vector cần hai thứ — nguồn embedding và một index đã nạp:
 
 ```env
-# Nguồn embedding: openai | ollama | local. Bỏ trống = tự dò theo API key sẵn có.
-EMBEDDING_BACKEND=
+# 1. Nguồn embedding: openai | ollama | local
+#    Bỏ trống = tự dò: có OPENAI_API_KEY → openai; có OLLAMA_BASE_URL → ollama; còn lại → local
+EMBEDDING_BACKEND=local
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_EMBED_MODEL=nomic-embed-text
 LOCAL_EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
 
+# 2. Nơi lưu index: FAISS (mặc định) hoặc pgvector
+FAISS_INDEX_PATH=faiss_index
+# USE_PGVECTOR=true
+# DATABASE_URL=postgresql://...
+
 # Tìm kiếm lai (mặc định bật)
 HYBRID_SEARCH=true
 ```
+
+Rồi nạp tiêu chuẩn vào index:
+
+```bash
+uv run python -m src.ingest      # in ra "Nguồn embedding: ..." để biết đang dùng đường nào
+```
+
+Chạy hoàn toàn offline (`EMBEDDING_BACKEND=local` hoặc `ollama`) **không cần**
+`OPENAI_API_KEY`. Trước đây `src/ingest.py` chặn cứng ở biến này nên offline không nạp
+được index và hybrid mất hẳn nhánh vector mà không có dấu hiệu gì — nay chỉ chặn khi
+nguồn embedding đang thực sự là `openai`.
+
+## Điểm mở rộng tra cứu tiêu chuẩn
+
+Đường tra cứu đăng ký qua `src/standards_backend.py` theo mức ưu tiên, thay vì tráo đối
+tượng tool `search_standards`:
+
+| Backend | Ưu tiên | Đăng ký ở |
+|---|---:|---|
+| `hybrid` | 20 | `src/agents_phase_d_patch.py` |
+| `vectorstore` | 10 | `src/vector_search_bind.py` |
+| (dự phòng) tra từ khóa offline | — | `src/tools.py::_legacy_faiss_search` |
+
+Backend nào lỗi hoặc không có kết quả thì tự nhường xuống đường tiếp theo, nên tra cứu
+tiêu chuẩn luôn trả về câu trả lời dùng được.
 
 ## Test
 
