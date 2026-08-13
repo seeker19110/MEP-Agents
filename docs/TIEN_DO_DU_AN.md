@@ -11,7 +11,7 @@ chạy được thật, cái gì mới chỉ viết xong mà chưa kiểm chứn
 | Chỉ số | Giá trị | Ghi chú |
 |---|---:|---|
 | Mã nguồn Python (`src/`) | ~12.660 dòng | 58 module |
-| Test Python | **590 đạt / 0 lỗi** | 56 file trong `tests/` |
+| Test Python | **600 đạt / 0 lỗi** | 57 file trong `tests/` |
 | Test giao diện | **7 đạt / 0 lỗi** | Playwright, Chromium thật (`web/tests-ui/`) |
 | Số PR đã hợp nhất | 32 | tính tới `c44e3b3` |
 | Phase đã hợp nhất | A, B, C, D | xem mục 2 |
@@ -146,6 +146,19 @@ dính lớp lỗi đã gặp — để lại có chủ đích.
   toán mang theo cảnh báo. Xem `TECH_DEBT.md` mục 11.
 - **Chưa làm được:** chạy Docker Compose (không có Docker daemon) và dựng Ollama thật
   (chưa cài). Hai việc này vẫn cần máy khác.
+
+## 4g. Tái cấu trúc module: cắt vòng import (đợt thứ bảy)
+
+`tools.py` và `qs_tools.py` import ngược nhau ở mức module, khiến `import src.qs_tools`
+trực tiếp bị vỡ và buộc cả hai file phải dồn import xuống giữa/cuối file kèm `# noqa: E402`.
+
+- Tách hàm dùng chung sang **`src/mepf_spec.py`** — module nền, không import module nào
+  của dự án. Vòng lặp đứt hẳn.
+- Toàn bộ import của hai file về đầu file; **không còn `# noqa: E402`** nào.
+- `src/api.py` nạp thẳng từ `src.qs_tools` thay vì đi vòng qua `src.tools`.
+- Mã nguồn **giảm ròng ~14 dòng** trong ba file, dù thêm một module mới.
+- `tests/test_no_import_cycles.py` nạp từng module lõi trong **tiến trình sạch** để vòng
+  lặp quay lại là đỏ ngay; đã thử tái lập vòng cũ để xác nhận test bắt được.
 
 ## 5. Việc còn nợ
 

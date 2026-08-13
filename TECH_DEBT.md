@@ -16,7 +16,7 @@ Trạng thái tổng thể và số liệu hiện hành nằm ở [`docs/TIEN_DO
 | 5 | Computer Vision (YOLO cho bản vẽ rác) | 🟡 Trung bình | Đã làm 1 phần — cần dữ liệu gán nhãn thật |
 | 9 | Kiểm thử thật với Revit/AutoCAD + E2E | 🟡 Trung bình | ✅ E2E (hạ tầng thật) + test UI Playwright đều đã chạy đạt; Revit/AutoCAD vẫn chưa |
 | 11 | Bảng đơn giá cũ mà không ai cảnh báo | 🟠 Cao | ✅ Đã trả — xem mục 11 |
-| 12 | Vòng lặp import giữa `tools.py` và `qs_tools.py` | 🟢 Thấp | Chưa làm — xem mục 12 |
+| 12 | Vòng lặp import giữa `tools.py` và `qs_tools.py` | 🟢 Thấp | ✅ Đã trả — xem mục 12 |
 | 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm — cần phần cứng thật |
 | 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Chưa làm — cần tài khoản cổng thanh toán thật |
 | 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | ✅ Đã trả — không còn chỗ nào gán đè hàm/tool; xem mục 10 |
@@ -276,14 +276,25 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
 - **Còn lại:** đơn giá trong repo vẫn là **giá tham khảo nội bộ, chưa đối chiếu công bố
   giá của Sở Xây dựng**, và chưa phân theo vùng. Đây là việc của người có số liệu thật.
 
-## 12. Vòng lặp import giữa `tools.py` và `qs_tools.py` 🟢 Chưa làm
+## 12. Vòng lặp import giữa `tools.py` và `qs_tools.py` ✅ Đã trả
 
-- **Hiện trạng:** `import src.qs_tools` **trực tiếp** (không qua `src.tools` trước) thì vỡ
-  với `ImportError ... partially initialized module`: `qs_tools` import
-  `tools.normalize_mepf_parameter_spec` ở cuối file, còn `tools` lại import ngược một loạt
-  tool từ `qs_tools`.
-- **Vì sao chưa vỡ trong thực tế:** mọi đường vào hệ thống (`graph.py`, `api.py`,
-  `celery_app.py`) đều chạm `src.tools` trước, nên vòng lặp luôn được gỡ đúng thứ tự.
-- **Vì sao chưa sửa:** gỡ vòng lặp trong một module 1.600 dòng là tái cấu trúc thật sự
-  (tách phần dùng chung ra module thứ ba), rủi ro cao hơn hẳn lợi ích khi chưa có ai gặp
-  lỗi này ngoài test. Ghi lại để người sau không mất thời gian chẩn đoán từ đầu.
+- **Vấn đề:** `qs_tools` import `normalize_mepf_parameter_spec` từ `tools`, còn `tools`
+  import ngược một loạt tool từ `qs_tools` — cả hai ở mức module. Hệ quả:
+  - `import src.qs_tools` **trực tiếp** vỡ với `partially initialized module`; chỉ chạy
+    được nhờ mọi đường vào hệ thống vô tình chạm `src.tools` trước.
+  - Cả hai file phải dồn import xuống **giữa/cuối file** kèm `# noqa: E402` và một đoạn
+    chú thích dài giải thích vì sao — người đọc sau dễ tưởng là tùy tiện, "dọn" lên đầu
+    rồi làm vỡ.
+  - `src/api.py` phải nạp `build_revit_boq_excel` **vòng qua** `src.tools` thay vì lấy
+    thẳng từ nơi định nghĩa.
+- **Đã làm:** tách hàm dùng chung sang **`src/mepf_spec.py`** — module nền thuần văn bản,
+  chỉ phụ thuộc `re`, **không import module nào của dự án** (có test canh điều kiện này).
+  Vòng lặp đứt hẳn, kéo theo:
+  - Toàn bộ import của `tools.py` và `qs_tools.py` về đúng đầu file; **không còn một
+    `# noqa: E402` nào** trong hai file.
+  - `src/api.py` nạp thẳng từ `src.qs_tools`.
+  - `tools.py` vẫn re-export `normalize_mepf_parameter_spec` nên mã sẵn có không phải sửa.
+- **Kiểm chứng:** `tests/test_no_import_cycles.py` nạp **từng module lõi trong một tiến
+  trình sạch** (`python -c "import src.X"`), nên vòng lặp quay lại là đỏ ngay — đã thử tái
+  lập vòng cũ để xác nhận test bắt được. Ngoài ra E2E hạ tầng thật và 7 test giao diện đều
+  chạy lại đạt, vì đổi thứ tự import là đúng loại thay đổi chỉ vỡ lúc chạy thật.

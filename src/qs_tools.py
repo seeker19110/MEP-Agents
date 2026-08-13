@@ -12,13 +12,20 @@ tức là chưa dùng được cho hồ sơ thầu. Ở đây:
 
 Toàn bộ phép tính là Python xác định, LLM không tham gia tính tiền.
 """
+import json
 import logging
+import math
 import os
 import unicodedata
 
+import pandas as pd
 import polars as pl
+from ezdxf import audit
 from langchain_core.tools import tool
 
+from src import cad_loader, cad_geometry, cad_standards, cad_units
+from src.bim_tools import classify_layer_system, classify_block_system
+from src.mepf_spec import normalize_mepf_parameter_spec
 from src.workspace import resolve_safe_path, get_project_root
 
 logger = logging.getLogger(__name__)
@@ -510,17 +517,6 @@ def export_boq_vietnam(boq_excel_path: str, output_excel_path: str = "BOQ_mau_ch
     except Exception as e:
         return f"Lỗi xuất BOQ mẫu chuẩn: {e}"
 
-# Đặt SAU các hàm phía trên (không phải đầu file) vì import `src.tools` ở đây, mà
-# `src.tools` (module cha) lại import ngược từ `qs_tools` ở module-level -> đặt ở đầu
-# file sẽ tạo vòng import khi `qs_tools` được nạp trước `tools`. Xem giải thích tương tự
-# ở `src/api.py`.
-import json  # noqa: E402
-import math  # noqa: E402
-import pandas as pd  # noqa: E402
-from ezdxf import audit  # noqa: E402
-from src import cad_loader, cad_geometry, cad_standards, cad_units  # noqa: E402
-from src.tools import normalize_mepf_parameter_spec  # noqa: E402
-from src.bim_tools import classify_layer_system, classify_block_system  # noqa: E402
 
 def aggregate_block_attributes(block_counts: dict):
     """Gộp các lần chèn cùng một loại thiết bị lại, bỏ qua thuộc tính ĐỊNH DANH.

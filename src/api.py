@@ -9,7 +9,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from celery.result import AsyncResult
 from src.celery_app import app as celery_app, parse_cad_to_db_task
-from src.tools import build_revit_boq_excel
+# Nạp thẳng từ module định nghĩa. Trước đây phải đi vòng qua `src.tools` (nơi re-export)
+# để né vòng import giữa `tools` và `qs_tools` — vòng đó nay đã được cắt bằng
+# `src/mepf_spec.py`, xem TECH_DEBT.md mục 12.
+from src.qs_tools import build_revit_boq_excel
 from src.workspace import get_project_root
 
 app = FastAPI(
