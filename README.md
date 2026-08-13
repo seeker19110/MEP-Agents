@@ -120,7 +120,7 @@ data/
   standards/            # Kho tiêu chuẩn cho RAG (TCVN Điện/PCCC/Cấp thoát nước, ASHRAE)
   unit_prices.csv       # CSDL đơn giá vật tư/nhân công/máy — SỬA GIÁ Ở ĐÂY
   blocks/               # Thư viện Block MEPF chuẩn
-tests/                  # Test suite (pytest)
+tests/                  # Test suite (pytest) — 551 test
 ```
 
 ## Cài đặt và chạy
@@ -174,7 +174,14 @@ Toàn bộ "suy nghĩ", thời gian thực thi và lỗi của từng tác nhân
 
 ## Tài liệu khác
 
+- [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md) — **trạng thái dự án hiện tại**: số
+  liệu, các Phase đã hợp nhất, việc còn nợ, đề xuất việc tiếp theo. Đọc file này trước.
 - [`AI_MODEL_SETUP.md`](AI_MODEL_SETUP.md) — chọn model theo vai trò, chế độ offline, chi phí.
+- [`TECH_DEBT.md`](TECH_DEBT.md) — nợ kỹ thuật: cái gì chưa làm và **vì sao chưa làm được**.
+- Tài liệu từng Phase: [`README_PHASE_A.md`](README_PHASE_A.md) (skill CAD/QS),
+  [`README_PHASE_B.md`](README_PHASE_B.md) (workflow, HIL),
+  [`README_PHASE_C.md`](README_PHASE_C.md) (Postgres/S3/JWT),
+  [`README_PHASE_D.md`](README_PHASE_D.md) (tìm kiếm lai, song song hóa).
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — Docker, docker-compose kèm Ollama, systemd VPS, Streamlit Cloud.
 - [`MEPF_BACKLOG.md`](MEPF_BACKLOG.md) — lịch sử backlog tính năng (đã xử lý hết) và tool tương ứng.
 - [`docs/AUDIT_BOC_KHOI_LUONG.md`](docs/AUDIT_BOC_KHOI_LUONG.md) — hồ sơ rà soát sai lệch bản vẽ → khối lượng: 19 nguồn đã xử lý, chỗ đã rà sạch, chỗ cố ý không sửa, kiểm kê hằng số.

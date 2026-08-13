@@ -1581,6 +1581,22 @@ from src.cad_revision import (  # noqa: E402
 )
 from src.vision_tools import detect_cad_symbols_yolo  # noqa: E402
 
+# Skill Phase A/B đã ổn định — đăng ký thẳng vào registry thay vì gắn qua tầng patch lúc
+# import. Tầng patch (`src/cad_phase_a_bind.py`, `src/phase_b_bind.py`) vẫn giữ nguyên và
+# vẫn chạy được, nhưng nay chỉ còn là mạng lưới an toàn: các hàm append đều bỏ qua tool đã
+# có sẵn. Xem TECH_DEBT.md mục 10 về lý do rút dần khỏi kiểu nối bằng patch.
+# `cad_macros` chỉ import `src.tools` bên trong thân hàm nên import ở đây không tạo vòng lặp.
+from src.cad_block_replace import replace_blocks_by_mapping  # noqa: E402
+from src.cad_batch_edit import batch_edit_pipes, batch_replace_text, update_title_block  # noqa: E402
+from src.cad_macros import prepare_drawing, full_boq  # noqa: E402
+from src.qs_auditor_tools import qs_audit_checklist  # noqa: E402
+from src.boq_diff import compare_boq  # noqa: E402
+
+_PHASE_A_CAD_TOOLS = [replace_blocks_by_mapping, batch_edit_pipes, batch_replace_text,
+                      update_title_block, prepare_drawing]
+_PHASE_A_QS_TOOLS = [replace_blocks_by_mapping, prepare_drawing, full_boq, batch_replace_text]
+_PHASE_B_QS_TOOLS = [qs_audit_checklist, compare_boq]
+
 tools = [
     search_standards, search_web, calculate, execute_python_code, list_directory,
     read_excel, write_excel, read_word, write_word, read_pdf,
@@ -1606,6 +1622,7 @@ tools = [
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
     auto_route_mepf_path, generate_calculation_report, lookup_equipment_catalog, extract_new_blocks_to_library,
     detect_cad_symbols_yolo,
+    *_PHASE_A_CAD_TOOLS, full_boq, *_PHASE_B_QS_TOOLS,
 ]
 
 # Giảm token: trước đây MỌI agent đều bị bind cả danh sách `tools` đầy đủ (30+ schema),
@@ -1642,20 +1659,20 @@ TOOLS_BY_ROLE = {
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, ai_block_recovery,
         lookup_unit_price, calc_boq_cost, export_boq_vietnam, convert_dwg_to_dxf, calc_support_hangers,
         render_cad_image, detect_cad_symbols_yolo,
-    ],
+    ] + _PHASE_A_QS_TOOLS + _PHASE_B_QS_TOOLS,
     "cad": _COMMON_TOOLS + [
         read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image,
         analyze_cad_spatial_context, execute_python_code, optimize_cad_drawing,
         standardize_cad_drawing, auto_route_mepf_path, extract_new_blocks_to_library,
         snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
         convert_dwg_to_dxf, add_color_legend, audit_cad_drawing_errors, detect_cad_symbols_yolo,
-    ],
+    ] + _PHASE_A_CAD_TOOLS,
     "bim": _COMMON_TOOLS + [
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, detect_clashes,
         check_pipe_connectivity, read_ifc_model,
         diff_cad_revisions, list_cad_revisions, convert_dwg_to_dxf, audit_cad_drawing_errors,
         render_cad_image, detect_cad_symbols_yolo,
-    ],
+    ] + _PHASE_B_QS_TOOLS,
 }
 
 def get_tools_for_role(role: str) -> list:
