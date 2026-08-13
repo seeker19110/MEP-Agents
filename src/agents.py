@@ -14,8 +14,40 @@ import os
 
 logger = logging.getLogger(__name__)
 
+#: Địa chỉ mặc định khi chạy LLM cục bộ ngay trên máy đang chạy app.
+_LOCAL_LLM_DEFAULTS = {
+    "ollama": "http://localhost:11434",
+    "vllm": "http://localhost:8000",
+}
+
+
+def resolve_local_base_url(provider: str) -> str:
+    """Địa chỉ server LLM cục bộ, đọc từ biến môi trường.
+
+    Trước đây địa chỉ này bị hardcode `localhost` trong `_build_llm`, trong khi phía
+    embedding (`src/local_embeddings.py`) lại đọc `OLLAMA_BASE_URL`. Chạy Ollama ở máy
+    khác hoặc trong Docker Compose thì embedding trỏ đúng còn LLM vẫn gọi vào chính
+    container của nó — hai nửa của cùng một cấu hình đi hai đường khác nhau.
+
+    Chuẩn hóa luôn đuôi `/v1`: các client này nói giao thức OpenAI, còn biến
+    `OLLAMA_BASE_URL` dùng chung với embedding thì viết dạng không có `/v1`.
+    """
+    key = (provider or "").lower().strip()
+    default = _LOCAL_LLM_DEFAULTS.get(key, "")
+    if key == "ollama":
+        base = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST") or default
+    elif key == "vllm":
+        base = os.getenv("VLLM_BASE_URL") or default
+    else:
+        return ""
+    base = (base or default).strip().rstrip("/")
+    if not base:
+        return ""
+    return base if base.endswith("/v1") else f"{base}/v1"
+
+
 @lru_cache(maxsize=16)
-def _build_llm(provider: str, model_name: str, api_key: str):
+def _build_llm(provider: str, model_name: str, api_key: str, base_url: str = ""):
     """Construct the actual LLM client. Cached by (provider, model, key) so repeated
     agent turns reuse one client instead of re-instantiating on every node call, while
     still picking up hot-reloaded .env changes (a different key/model busts the cache)."""
@@ -31,7 +63,7 @@ def _build_llm(provider: str, model_name: str, api_key: str):
     elif provider == "ollama":
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(
-            base_url="http://localhost:11434/v1",
+            base_url=base_url or "http://localhost:11434/v1",
             api_key="ollama",
             model=model_name,
             temperature=0
@@ -39,8 +71,8 @@ def _build_llm(provider: str, model_name: str, api_key: str):
     elif provider == "vllm":
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(
-            base_url="http://localhost:8000/v1",
-            api_key="vllm-api-key",
+            base_url=base_url or "http://localhost:8000/v1",
+            api_key=os.getenv("VLLM_API_KEY", "") or "vllm-api-key",
             model=model_name,
             temperature=0
         )
@@ -91,7 +123,9 @@ def get_llm(role: str = DEFAULT_ROLE):
         if not model_name or "llama" in model_name or "gemini" in model_name or "claude" in model_name:
             model_name = "gpt-4o-mini"
 
-    return _build_llm(provider, model_name, key)
+    # base_url là một phần khóa cache: đổi địa chỉ server cục bộ trong .env phải tạo client
+    # mới, không dùng lại client đang trỏ về địa chỉ cũ.
+    return _build_llm(provider, model_name, key, resolve_local_base_url(provider))
 
 def resolve_provider(role: str = DEFAULT_ROLE) -> str:
     """Provider đang được cấu hình cho một vai trò (không khởi tạo client)."""

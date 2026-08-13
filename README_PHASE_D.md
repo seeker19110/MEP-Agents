@@ -61,6 +61,58 @@ Chạy hoàn toàn offline (`EMBEDDING_BACKEND=local` hoặc `ollama`) **không 
 được index và hybrid mất hẳn nhánh vector mà không có dấu hiệu gì — nay chỉ chặn khi
 nguồn embedding đang thực sự là `openai`.
 
+## Cấu hình theo kiểu triển khai
+
+Bốn trục độc lập: **LLM** (`LLM_PROVIDER`), **embedding** (`EMBEDDING_BACKEND`), **cách tra
+cứu** (`HYBRID_SEARCH`), **nơi lưu index** (`FAISS_INDEX_PATH`/`USE_PGVECTOR`).
+`HYBRID_SEARCH` chạy được ở mọi kiểu — nó chỉ nói "gộp vector với từ khóa", không quy định
+vector đến từ đâu.
+
+### Kiểu A — toàn bộ dùng API
+
+```env
+LLM_PROVIDER=openai
+MODEL_NAME=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+EMBEDDING_BACKEND=openai
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+HYBRID_SEARCH=true
+```
+
+Muốn tăng chất lượng đúng chỗ đáng tiền thì ghi đè theo vai trò, VD
+`REVIEWER_LLM_PROVIDER=anthropic` + `REVIEWER_MODEL_NAME=claude-sonnet-5`.
+
+### Kiểu B — lai: LLM/embedding cục bộ, API cho vai trò cần suy luận chặt
+
+```env
+LLM_PROVIDER=ollama
+MODEL_NAME=llama3.1:8b
+OLLAMA_BASE_URL=http://ollama:11434      # bỏ trống = localhost
+
+SUPERVISOR_LLM_PROVIDER=openai
+SUPERVISOR_MODEL_NAME=gpt-4o-mini
+REVIEWER_LLM_PROVIDER=openai
+REVIEWER_MODEL_NAME=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+
+EMBEDDING_BACKEND=local                   # hoặc ollama
+HYBRID_SEARCH=true
+```
+
+### Kiểu C — offline hoàn toàn
+
+Giống kiểu B nhưng bỏ hết `*_LLM_PROVIDER=openai` và không cần `OPENAI_API_KEY`. Tra cứu
+vẫn đủ cả hai nhánh vì embedding chạy cục bộ.
+
+**Lưu ý khi LLM cục bộ không nằm cùng máy** (máy riêng, hoặc service riêng trong Docker
+Compose): đặt `OLLAMA_BASE_URL` / `VLLM_BASE_URL`. `OLLAMA_BASE_URL` dùng **chung** cho cả
+LLM lẫn embedding, viết dạng không có đuôi `/v1` — phía LLM tự thêm. Không đặt thì cả hai
+về `localhost`, mà trong container "localhost" là chính container đó.
+
+**Cách kiểm nhánh vector đã chạy chưa:** dòng đầu kết quả tra cứu ghi
+`Kết quả HYBRID (vector + từ khóa)` là đủ hai nhánh. Chưa chạy `src.ingest` thì hybrid vẫn
+trả kết quả nhưng chỉ từ nhánh từ khóa, **không có cảnh báo**.
+
 ## Điểm mở rộng tra cứu tiêu chuẩn
 
 Đường tra cứu đăng ký qua `src/standards_backend.py` theo mức ưu tiên, thay vì tráo đối

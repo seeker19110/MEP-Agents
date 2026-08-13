@@ -140,6 +140,15 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
 - Plugin Revit (`config.json`/`MEP_AGENTS_API_BASE`) và AutoCAD
   (`MEP_AGENTS_HOME`/`MEP_AGENTS_API_BASE`) đã hết hardcode từ trước (xem
   `README_WINDOWS.md` mục 5).
+- **LLM chạy cục bộ** (`src/agents.py::_build_llm`) từng hardcode `http://localhost:11434`
+  cho Ollama và `http://localhost:8000` cho vLLM — sót lại từ đợt trả nợ trước, chỉ lộ ra
+  khi thật sự dựng cấu hình lai (LLM cục bộ ở máy riêng / service riêng trong Compose).
+  Đáng chú ý là **hai nửa của cùng một cấu hình đi hai đường khác nhau**: phía embedding
+  (`src/local_embeddings.py`) vẫn luôn đọc `OLLAMA_BASE_URL`, nên embedding trỏ đúng máy
+  còn LLM thì gọi vào chính container của nó rồi báo lỗi kết nối. Nay `resolve_local_base_url()`
+  đọc `OLLAMA_BASE_URL`/`OLLAMA_HOST`/`VLLM_BASE_URL`, dùng chung biến với embedding và tự
+  chuẩn hóa đuôi `/v1`; không đặt thì vẫn về `localhost` như cũ. `base_url` cũng được đưa
+  vào khóa `lru_cache` của `_build_llm` — đổi địa chỉ trong `.env` phải tạo client mới.
 - **Web App** (`web/src/App.jsx`) trước đây hardcode `http://localhost:8083` — nay đọc qua
   biến môi trường Vite `VITE_API_BASE`/`VITE_WS_BASE`/`VITE_API_KEY` (`web/.env.example`),
   không đặt thì vẫn rơi về `localhost:8083` như cũ cho dev. Lưu ý: biến `VITE_*` là

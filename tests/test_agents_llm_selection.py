@@ -93,3 +93,63 @@ def test_call_mepf_agent_derives_role_from_agent_name(monkeypatch, agent_name, e
         agents.call_mepf_agent(state, "system prompt", agent_name)
 
     assert captured["role"] == expected_role
+
+
+# --- Địa chỉ server LLM cục bộ (Ollama / vLLM) ---
+
+def test_local_base_url_defaults_to_localhost(monkeypatch):
+    from src.agents import resolve_local_base_url
+    for var in ("OLLAMA_BASE_URL", "OLLAMA_HOST", "VLLM_BASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+    assert resolve_local_base_url("ollama") == "http://localhost:11434/v1"
+    assert resolve_local_base_url("vllm") == "http://localhost:8000/v1"
+
+
+def test_local_base_url_reads_env(monkeypatch):
+    """Hồi quy: địa chỉ từng bị hardcode `localhost` nên chạy Ollama ở máy khác hoặc trong
+    Docker Compose là LLM không bao giờ kết nối được, dù embedding đã trỏ đúng."""
+    from src.agents import resolve_local_base_url
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    assert resolve_local_base_url("ollama") == "http://ollama:11434/v1"
+
+    monkeypatch.setenv("VLLM_BASE_URL", "http://gpu-box:8000")
+    assert resolve_local_base_url("vllm") == "http://gpu-box:8000/v1"
+
+
+def test_local_base_url_shares_variable_with_embeddings(monkeypatch):
+    """`OLLAMA_BASE_URL` dùng chung với `src/local_embeddings.py`, nơi nó được viết KHÔNG
+    có đuôi `/v1`. Hai nửa cấu hình phải đọc cùng một biến mà vẫn ra địa chỉ đúng."""
+    from src.agents import resolve_local_base_url
+    from src.local_embeddings import _ollama_embeddings
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    assert resolve_local_base_url("ollama").endswith("/v1")
+    assert _ollama_embeddings().base_url.rstrip("/") == "http://ollama:11434"
+
+
+def test_local_base_url_does_not_double_v1(monkeypatch):
+    from src.agents import resolve_local_base_url
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434/v1")
+    assert resolve_local_base_url("ollama") == "http://ollama:11434/v1"
+
+
+def test_local_base_url_empty_for_cloud_providers(monkeypatch):
+    from src.agents import resolve_local_base_url
+    for provider in ("openai", "groq", "gemini", "anthropic"):
+        assert resolve_local_base_url(provider) == ""
+
+
+def test_changing_base_url_builds_a_new_client(monkeypatch):
+    """`_build_llm` có lru_cache — base_url phải nằm trong khóa cache, nếu không đổi địa
+    chỉ trong .env sẽ dùng lại client cũ trỏ về server cũ."""
+    from src import agents
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("MODEL_NAME", "llama3.1:8b")
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://box-a:11434")
+    first = agents.get_llm("CAD")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://box-b:11434")
+    second = agents.get_llm("CAD")
+
+    assert first is not second
+    assert "box-b" in str(second.root_client.base_url)
