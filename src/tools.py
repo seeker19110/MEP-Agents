@@ -62,6 +62,7 @@ from src.cad_revision import (
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
 )
 from src.vision_tools import detect_cad_symbols_yolo
+from src.ocr_tools import ocr_image, ocr_pdf_pages, ocr_title_block
 from src import cad_standards
 from src import cad_geometry
 from src import cad_loader
@@ -447,7 +448,7 @@ def read_pdf(file_path: str, pages: str = "", max_chars: int = 8000) -> str:
                 f"PDF '{file_path}' ({total} trang) KHÔNG có lớp văn bản — {empty_pages}/"
                 f"{len(indices)} trang đã đọc không rút được chữ nào. Gần như chắc chắn "
                 f"đây là bản scan/ảnh. Không thể đọc bằng trình đọc PDF thông thường; "
-                f"cần OCR. Đừng kết luận file này không có nội dung."
+                f"cần OCR: gọi `ocr_pdf_pages` trên chính file này. Đừng kết luận file này không có nội dung."
             )
 
         text = "\n".join(chunks)
@@ -459,7 +460,7 @@ def read_pdf(file_path: str, pages: str = "", max_chars: int = 8000) -> str:
                       f"tham số pages='<khoảng trang tiếp theo>'.]")
         if empty_pages:
             text += (f"\n[Cảnh báo: {empty_pages}/{len(indices)} trang không rút được chữ "
-                     f"— các trang đó có thể là ảnh scan, cần OCR.]")
+                     f"— các trang đó có thể là ảnh scan, đọc bằng `ocr_pdf_pages`.]")
         return f"{header}\n{text}"
     except Exception as e:
         return f"Lỗi đọc PDF: {e}"
@@ -1742,6 +1743,7 @@ tools = [
     snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
     auto_route_mepf_path, generate_calculation_report, lookup_equipment_catalog, extract_new_blocks_to_library,
     detect_cad_symbols_yolo,
+    ocr_image, ocr_pdf_pages, ocr_title_block,
     *_PHASE_A_CAD_TOOLS, full_boq, *_PHASE_B_QS_TOOLS,
 ]
 
@@ -1751,7 +1753,11 @@ tools = [
 # thực sự cần trong LLM request, cắt đáng kể input token mỗi lượt gọi mà không đổi
 # hành vi (ToolNode trong src/graph.py vẫn dùng `tools` đầy đủ để thực thi bất kỳ
 # tool_call nào, không phụ thuộc danh sách bind ở đây).
-_COMMON_TOOLS = [search_standards, search_web, calculate, list_directory, read_excel, read_word, read_pdf, generate_calculation_report, lookup_equipment_catalog]
+_COMMON_TOOLS = [search_standards, search_web, calculate, list_directory, read_excel, read_word, read_pdf,
+                 # Hồ sơ scan tới với bất kỳ bộ phận nào (thuyết minh, catalog chụp lại), nên hai
+                 # tool OCR nằm ở bộ chung; `ocr_title_block` thì chỉ CAD/QS/BIM cần.
+                 ocr_image, ocr_pdf_pages,
+                 generate_calculation_report, lookup_equipment_catalog]
 
 TOOLS_BY_ROLE = {
     "mechanical": _COMMON_TOOLS + [
@@ -1778,7 +1784,7 @@ TOOLS_BY_ROLE = {
     "qs": _COMMON_TOOLS + [
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, ai_block_recovery,
         lookup_unit_price, calc_boq_cost, export_boq_vietnam, convert_dwg_to_dxf, calc_support_hangers,
-        render_cad_image, detect_cad_symbols_yolo,
+        render_cad_image, detect_cad_symbols_yolo, ocr_title_block,
     ] + _PHASE_A_QS_TOOLS + _PHASE_B_QS_TOOLS,
     "cad": _COMMON_TOOLS + [
         read_cad, write_cad, edit_cad, ai_block_recovery, render_cad_image,
@@ -1786,12 +1792,13 @@ TOOLS_BY_ROLE = {
         standardize_cad_drawing, auto_route_mepf_path, extract_new_blocks_to_library,
         snapshot_cad, list_cad_revisions, diff_cad_revisions, restore_cad_revision,
         convert_dwg_to_dxf, add_color_legend, audit_cad_drawing_errors, detect_cad_symbols_yolo,
+        ocr_title_block,
     ] + _PHASE_A_CAD_TOOLS,
     "bim": _COMMON_TOOLS + [
         auto_quantity_takeoff, read_cad, write_excel, analyze_cad_spatial_context, detect_clashes,
         check_pipe_connectivity, read_ifc_model,
         diff_cad_revisions, list_cad_revisions, convert_dwg_to_dxf, audit_cad_drawing_errors,
-        render_cad_image, detect_cad_symbols_yolo,
+        render_cad_image, detect_cad_symbols_yolo, ocr_title_block,
     ] + _PHASE_B_QS_TOOLS,
     # QS Auditor CHỈ được kiểm toán, prompt của nó nói rõ "không được phép tính lại từ
     # đầu". Trước đây vai trò này không có mặt trong bảng nên rơi vào nhánh mặc định và

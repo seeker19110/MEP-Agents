@@ -40,7 +40,7 @@ chỗ vi phạm chúng:
 | **DXF parser** | `cad_loader.py`, `cad_geometry.py`, `cad_cache.py`, `cad_*_ops.py` (14 module) | ~90% | Chín. Đọc, sửa, XREF, revision, cache theo mtime. Không có việc lớn phải làm. |
 | **DWG converter** | `cad_loader.py::convert_dwg_to_dxf` (ODA File Converter) | ~40% | **Một chiều**. Đọc được `.dwg`, nhưng không ghi ra `.dwg` — sản phẩm giao khách luôn là `.dxf`. |
 | **AutoCAD** | `autocad/autoboq.py` + `AUTOBOQ.lsp` (plugin đẩy lên API) | ~25% | Chỉ có chiều **AutoCAD → hệ thống**. AI không điều khiển được phiên AutoCAD đang mở. `pywin32` khai trong `pyproject.toml` nhưng `src/` không dùng dòng nào. |
-| **OCR** | *không có* | **0%** | Không một module, không một phụ thuộc. Xem mục 2.1 — đây là lỗ hổng nặng nhất. |
+| **OCR** | `ocr_tools.py` — `ocr_image`, `ocr_pdf_pages`, `ocr_title_block` | ~70% | Có engine cắm được (`register_ocr_engine`), đánh dấu chữ không chắc, cảnh báo bắt buộc. Chưa chạy thử với Tesseract thật. |
 | **PDF parser** | `tools.py::read_pdf` (pypdf) | ~30% | Đã phát hiện được bản scan, chọn được khoảng trang, cắt có khai báo. Vẫn chưa: rút bảng, hình học vector, OCR. |
 | **Excel** | `tools.py::read_excel`/`write_excel`, `qs_tools.py`, `panel_schedule.py`, `boq_diff.py` | ~55% | Đường **ghi BOQ** tốt (xlsxwriter, định dạng VN). Đường **đọc** đã nêu tên sheet chưa đọc và phân trang được; chưa có ghi nhiều sheet, chưa có revision. |
 | **Calculator** | `tools.py::calculate` (AST an toàn), `execute_python_code` (sandbox) | ~50% | An toàn nhưng **không biết đơn vị**. Mọi phép quy đổi CFM↔m³/h, HP↔kW hiện do LLM tự làm trong đầu — vi phạm nguyên tắc 1. |
@@ -136,7 +136,7 @@ thống, không được nới):
 - **Đăng ký tường minh:** thêm tool = sửa `TOOLS_BY_ROLE` + `tools` trong `src/tools.py`.
   Không gán đè module khác (xem `TECH_DEBT.md` mục 10).
 
-### 3.1 OCR — `src/ocr_tools.py` *(ưu tiên cao nhất)*
+### 3.1 OCR — `src/ocr_tools.py` ✅ Đã làm *(chưa chạy thử với engine thật)*
 
 **Vì sao trước tiên:** lỗ hổng 2.1 nay đã *phát hiện* được bản scan, nhưng vẫn chưa *đọc* được nó — OCR là mảnh còn thiếu, và là điều kiện cần của PDF parser (3.2) lẫn
 việc đọc raster nhúng trong DXF.
@@ -177,8 +177,10 @@ def ocr_title_block(file_path: str, region: str = "auto") -> str:
   agent không được nối thẳng số OCR vào `calc_boq_cost`. Đây là hệ quả trực tiếp của
   nguyên tắc 1: OCR *là* một mô hình đoán.
 - `dpi` mặc định 300, trần 600 — cao hơn không tăng độ chính xác mà tăng RAM tuyến tính.
-- Bộ nhớ đệm theo `(đường dẫn, mtime, kích thước, tham số)`, dùng lại `cad_cache` để không
-  đẻ thêm một cơ chế cache thứ hai.
+- ~~Bộ nhớ đệm dùng lại `cad_cache`~~ — **không làm**: `cad_cache.readfile_cached` trả về
+  một `ezdxf` document, API của nó gắn chặt với DXF chứ không phải một cache khóa-giá trị
+  dùng chung. Ép OCR vào đó là bẻ cong một module đang chạy tốt để tiết kiệm vài dòng.
+  Chưa có cache cho OCR; thêm khi đo được là cần.
 
 **Phụ thuộc:** `pytesseract`, `pdf2image`, gói hệ thống `tesseract-ocr`,
 `tesseract-ocr-vie`, `poppler-utils`. Vào `[project.optional-dependencies].ocr`, không vào
@@ -370,7 +372,7 @@ Xếp theo *rủi ro nghiệp vụ đang tồn tại*, không theo độ khó.
 | # | Hạng mục | Vì sao ở vị trí này | Mục |
 |---|---|---|---|
 | 1 | ✅ **Đã làm** — vá `read_pdf` + `read_excel` (phát hiện bản scan, cắt có khai báo + đường đọc tiếp, nêu đích danh sheet chưa đọc) | Đang **trả về kết quả sai lệch âm thầm**. Không thêm phụ thuộc. Canh bằng `tests/test_read_silent_truncation.py` (12 test). | 2.1–2.3 |
-| 2 | OCR | Mở khóa toàn bộ nhóm hồ sơ scan — hiện là vùng mù hoàn toàn | 3.1 |
+| 2 | ✅ **Đã làm** — OCR (`src/ocr_tools.py`, 20 test) | Mở khóa nhóm hồ sơ scan — trước đó là vùng mù hoàn toàn. **Chưa chạy thử với Tesseract thật**, xem `TECH_DEBT.md` mục 13. | 3.1 |
 | 3 | Đơn vị (`unit_tools`) | LLM đang tự quy đổi số kỹ thuật, trái nguyên tắc 1 | 3.6 |
 | 4 | Excel đầy đủ + snapshot | Bảng khối lượng mang con số tiền mà chưa có revision | 3.5 |
 | 5 | PDF bảng + hình học vector | Mở đường bóc khối lượng khi khách chỉ có PDF | 3.2 |
