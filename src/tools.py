@@ -267,12 +267,55 @@ def list_directory(path: str = ".") -> str:
         return f"Lỗi đọc thư mục: {e}"
 
 @tool
-def read_excel(file_path: str) -> str:
-    """Đọc nội dung từ file Excel (.xlsx)."""
-    logger.info("Reading Excel: %s", file_path)
+def read_excel(file_path: str, sheet: str = "", max_rows: int = 200, offset: int = 0) -> str:
+    """Đọc nội dung một sheet của file Excel (.xlsx).
+
+    `sheet` rỗng = sheet đầu tiên, VÀ kết quả sẽ nêu tên các sheet còn lại chưa đọc.
+    `max_rows`/`offset` để đọc file lớn theo từng khúc mà không nhồi cả bảng vào ngữ cảnh.
+
+    Trước đây tool này gọi `pd.read_excel` với tham số mặc định, nghĩa là **chỉ đọc sheet
+    đầu tiên** rồi trả về như thể đó là toàn bộ file. Một bảng khối lượng của nhà thầu
+    thường tách 5 sheet (TỔNG HỢP / ĐIỆN / NƯỚC / PCCC / ĐHKK) — bốn sheet biến mất không
+    một dấu hiệu nào. Đúng loại "bỏ sót âm thầm" mà dự án cấm, nên nay mọi chỗ bỏ sót
+    (sheet chưa đọc, dòng bị cắt) đều phải hiện ra trong chuỗi trả về.
+    """
+    logger.info("Reading Excel: %s (sheet=%r, offset=%d)", file_path, sheet, offset)
     try:
-        df = pd.read_excel(resolve_safe_path(file_path))
-        return f"Dữ liệu Excel:\n{df.to_string(index=False)}"
+        safe_path = resolve_safe_path(file_path)
+        sheet_names = pd.ExcelFile(safe_path).sheet_names
+
+        if sheet:
+            if sheet not in sheet_names:
+                return (f"Lỗi đọc Excel: file không có sheet '{sheet}'. "
+                        f"Các sheet hiện có: {', '.join(sheet_names)}.")
+            target = sheet
+        else:
+            target = sheet_names[0]
+
+        df = pd.read_excel(safe_path, sheet_name=target)
+        total_rows = len(df)
+        offset = max(0, offset)
+        limit = total_rows if max_rows <= 0 else max_rows
+        window = df.iloc[offset:offset + limit]
+
+        lines = [f"Dữ liệu Excel — sheet '{target}' ({total_rows} dòng, {len(df.columns)} cột):"]
+        lines.append(window.to_string(index=False) if not window.empty
+                     else "(không có dòng nào trong khoảng đã chọn)")
+
+        shown_to = offset + len(window)
+        if shown_to < total_rows or offset > 0:
+            lines.append(
+                f"[Đã cắt: hiển thị dòng {offset + 1}–{shown_to}/{total_rows}. "
+                f"Đọc tiếp bằng offset={shown_to}.]"
+            )
+
+        others = [s for s in sheet_names if s != target]
+        if others:
+            lines.append(
+                f"[File còn {len(others)} sheet CHƯA đọc: {', '.join(others)}. "
+                f"Đọc bằng tham số sheet='<tên sheet>'.]"
+            )
+        return "\n".join(lines)
     except Exception as e:
         return f"Lỗi đọc Excel: {e}"
 
@@ -329,16 +372,95 @@ def write_word(file_path: str, content: str, font_name: str = 'Arial') -> str:
     except Exception as e:
         return f"Lỗi ghi Word: {e}"
 
+def _parse_page_range(spec: str, total: int) -> list[int]:
+    """'1-5' hoặc '2,7,9' → danh sách chỉ số trang (đếm từ 0). Rỗng = mọi trang.
+
+    Số trang ngoài phạm vi bị bỏ qua thay vì gây lỗi — người gọi là LLM, và một số trang
+    đoán thừa không đáng làm hỏng cả lượt.
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        return list(range(total))
+    picked: list[int] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            a, _, b = part.partition("-")
+            try:
+                start, end = int(a), int(b)
+            except ValueError:
+                continue
+            picked.extend(range(start - 1, end))
+        else:
+            try:
+                picked.append(int(part) - 1)
+            except ValueError:
+                continue
+    seen: set[int] = set()
+    return [p for p in picked if 0 <= p < total and not (p in seen or seen.add(p))]
+
+
 @tool
-def read_pdf(file_path: str) -> str:
-    """Đọc và trích xuất toàn bộ văn bản từ file PDF."""
-    logger.info("Reading PDF: %s", file_path)
+def read_pdf(file_path: str, pages: str = "", max_chars: int = 8000) -> str:
+    """Đọc và trích xuất văn bản từ file PDF. `pages` rỗng = toàn bộ, hoặc '1-5', '2,7,9'.
+
+    Tool này **phát hiện được bản scan**. Trước đây với một hồ sơ photo (rất phổ biến ở
+    hồ sơ thầu MEPF), `extract_text()` trả về chuỗi rỗng cho mọi trang nhưng tool vẫn báo
+    đủ "48 trang" — người đọc hoàn toàn có thể kết luận file không có nội dung rồi đi
+    tiếp. Nay trường hợp đó được nói thẳng ra.
+
+    Chỗ cắt ngắn cũng vậy: trước đây luôn dán "..." ở cuối kể cả khi không cắt, nên không
+    phân biệt được đã mất chữ hay chưa, và mất bao nhiêu cũng không biết.
+    """
+    logger.info("Reading PDF: %s (pages=%r)", file_path, pages)
     try:
         reader = PdfReader(resolve_safe_path(file_path))
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
-        return f"Nội dung PDF ({len(reader.pages)} trang):\n{text[:5000]}..."
+        total = len(reader.pages)
+        if total == 0:
+            return "PDF không có trang nào."
+
+        indices = _parse_page_range(pages, total)
+        if not indices:
+            return (f"Lỗi đọc PDF: khoảng trang '{pages}' không khớp trang nào "
+                    f"(file có {total} trang).")
+
+        chunks: list[str] = []
+        empty_pages = 0
+        for i in indices:
+            try:
+                page_text = reader.pages[i].extract_text() or ""
+            except Exception as page_err:      # trang hỏng không được làm hỏng cả file
+                page_text = ""
+                logger.warning("PDF page %d unreadable: %s", i + 1, page_err)
+            if not page_text.strip():
+                empty_pages += 1
+            chunks.append(f"--- Trang {i + 1} ---\n{page_text}")
+
+        # Chỉ kết luận "bản scan" khi KHÔNG rút được chữ nào. Dùng ngưỡng theo tỷ lệ trang
+        # thì một hồ sơ chủ yếu là bản vẽ, xen vài trang thuyết minh, sẽ bị thay nội dung
+        # đọc được bằng một câu báo scan — tức là tool tự bỏ sót dữ liệu, đúng cái lỗi mà
+        # nhánh này sinh ra để vá. Rút được chữ thì luôn trả chữ, kèm cảnh báo bên dưới.
+        if empty_pages == len(indices):
+            return (
+                f"PDF '{file_path}' ({total} trang) KHÔNG có lớp văn bản — {empty_pages}/"
+                f"{len(indices)} trang đã đọc không rút được chữ nào. Gần như chắc chắn "
+                f"đây là bản scan/ảnh. Không thể đọc bằng trình đọc PDF thông thường; "
+                f"cần OCR. Đừng kết luận file này không có nội dung."
+            )
+
+        text = "\n".join(chunks)
+        header = f"Nội dung PDF ({total} trang, đã đọc {len(indices)} trang):"
+        if max_chars > 0 and len(text) > max_chars:
+            omitted = len(text) - max_chars
+            text = (text[:max_chars]
+                    + f"\n[Đã cắt: bỏ qua {omitted:,} ký tự cuối. Đọc phần còn lại bằng "
+                      f"tham số pages='<khoảng trang tiếp theo>'.]")
+        if empty_pages:
+            text += (f"\n[Cảnh báo: {empty_pages}/{len(indices)} trang không rút được chữ "
+                     f"— các trang đó có thể là ảnh scan, cần OCR.]")
+        return f"{header}\n{text}"
     except Exception as e:
         return f"Lỗi đọc PDF: {e}"
 

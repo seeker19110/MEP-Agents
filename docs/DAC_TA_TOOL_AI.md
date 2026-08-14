@@ -41,8 +41,8 @@ chỗ vi phạm chúng:
 | **DWG converter** | `cad_loader.py::convert_dwg_to_dxf` (ODA File Converter) | ~40% | **Một chiều**. Đọc được `.dwg`, nhưng không ghi ra `.dwg` — sản phẩm giao khách luôn là `.dxf`. |
 | **AutoCAD** | `autocad/autoboq.py` + `AUTOBOQ.lsp` (plugin đẩy lên API) | ~25% | Chỉ có chiều **AutoCAD → hệ thống**. AI không điều khiển được phiên AutoCAD đang mở. `pywin32` khai trong `pyproject.toml` nhưng `src/` không dùng dòng nào. |
 | **OCR** | *không có* | **0%** | Không một module, không một phụ thuộc. Xem mục 2.1 — đây là lỗ hổng nặng nhất. |
-| **PDF parser** | `tools.py::read_pdf` (pypdf, 11 dòng) | ~15% | Chỉ rút text thô, cắt cụt âm thầm, không bảng, không hình học vector, không biết file là bản scan. |
-| **Excel** | `tools.py::read_excel`/`write_excel`, `qs_tools.py`, `panel_schedule.py`, `boq_diff.py` | ~55% | Đường **ghi BOQ** tốt (xlsxwriter, định dạng VN). Đường **đọc** thì đọc mỗi sheet đầu tiên, im lặng. |
+| **PDF parser** | `tools.py::read_pdf` (pypdf) | ~30% | Đã phát hiện được bản scan, chọn được khoảng trang, cắt có khai báo. Vẫn chưa: rút bảng, hình học vector, OCR. |
+| **Excel** | `tools.py::read_excel`/`write_excel`, `qs_tools.py`, `panel_schedule.py`, `boq_diff.py` | ~55% | Đường **ghi BOQ** tốt (xlsxwriter, định dạng VN). Đường **đọc** đã nêu tên sheet chưa đọc và phân trang được; chưa có ghi nhiều sheet, chưa có revision. |
 | **Calculator** | `tools.py::calculate` (AST an toàn), `execute_python_code` (sandbox) | ~50% | An toàn nhưng **không biết đơn vị**. Mọi phép quy đổi CFM↔m³/h, HP↔kW hiện do LLM tự làm trong đầu — vi phạm nguyên tắc 1. |
 | **Database** | `unit_prices.csv`, `equipment_catalog.json`, Postgres (chỉ cho checkpoint + pgvector) | ~30% | Không có tool truy vấn nào cho agent. Dữ liệu tra cứu nằm ở file phẳng, nạp nguyên bảng vào RAM. |
 
@@ -54,10 +54,10 @@ nhóm còn lại là nơi cần đặc tả.
 ## 2. Lỗ hổng đã kiểm chứng
 
 Mỗi mục dưới đây trỏ tới dòng code thật. Ba mục đầu là **vi phạm nguyên tắc "không bỏ sót
-âm thầm"** — nghĩa là hệ thống hiện có thể trả về một kết quả *trông hoàn chỉnh* trong khi
-đã bỏ mất dữ liệu.
+âm thầm"** — nghĩa là hệ thống có thể trả về một kết quả *trông hoàn chỉnh* trong khi đã bỏ
+mất dữ liệu — và **đã được sửa**; mô tả giữ nguyên để biết vì sao luật hiện tại là như vậy.
 
-### 2.1 🔴 PDF bản scan trả về rỗng, không một lời cảnh báo
+### 2.1 🔴 PDF bản scan trả về rỗng, không một lời cảnh báo ✅ Đã sửa
 
 `src/tools.py:333-343` — `read_pdf` gọi `PdfReader` rồi nối `page.extract_text()`. Với một
 bản vẽ scan hoặc hồ sơ thầu photo (rất phổ biến trong hồ sơ MEPF Việt Nam), `extract_text()`
@@ -71,14 +71,14 @@ Nội dung PDF (48 trang): ...
 luận "file không có nội dung" rồi đi tiếp. Đây là kiểu sai lệch tốn kém nhất mà dự án đã
 tự cấm.
 
-### 2.2 🔴 `read_pdf` cắt ở 5000 ký tự và luôn dán `...`
+### 2.2 🔴 `read_pdf` cắt ở 5000 ký tự và luôn dán `...` ✅ Đã sửa
 
 Cùng chỗ: `return f"Nội dung PDF ({len(reader.pages)} trang):\n{text[:5000]}..."`. Hai lỗi
 chồng nhau — dấu `...` được dán **kể cả khi không cắt** (nên không phân biệt được), và khi
 cắt thật thì không nói mất bao nhiêu. Một bảng thống kê vật tư ở trang 30 biến mất không
 dấu vết.
 
-### 2.3 🔴 `read_excel` đọc đúng **một** sheet, không nói là còn sheet khác
+### 2.3 🔴 `read_excel` đọc đúng **một** sheet, không nói là còn sheet khác ✅ Đã sửa
 
 `src/tools.py:269-277` — `pd.read_excel(path)` mặc định `sheet_name=0`. File BOQ của nhà
 thầu thường có `TONG HOP`, `DIEN`, `NUOC`, `PCCC`, `DHKK` trên năm sheet. Tool đọc sheet
@@ -138,7 +138,7 @@ thống, không được nới):
 
 ### 3.1 OCR — `src/ocr_tools.py` *(ưu tiên cao nhất)*
 
-**Vì sao trước tiên:** nó vá lỗ hổng 2.1, và nó là điều kiện cần của PDF parser (3.2) lẫn
+**Vì sao trước tiên:** lỗ hổng 2.1 nay đã *phát hiện* được bản scan, nhưng vẫn chưa *đọc* được nó — OCR là mảnh còn thiếu, và là điều kiện cần của PDF parser (3.2) lẫn
 việc đọc raster nhúng trong DXF.
 
 **Chọn engine.** Ba lựa chọn được cân nhắc:
@@ -369,7 +369,7 @@ Xếp theo *rủi ro nghiệp vụ đang tồn tại*, không theo độ khó.
 
 | # | Hạng mục | Vì sao ở vị trí này | Mục |
 |---|---|---|---|
-| 1 | Vá `read_pdf` + `read_excel` (cảnh báo scan, cắt có khai báo, cảnh báo đa sheet) | Đang **trả về kết quả sai lệch âm thầm**. Vài chục dòng code, không thêm phụ thuộc. | 2.1–2.3 |
+| 1 | ✅ **Đã làm** — vá `read_pdf` + `read_excel` (phát hiện bản scan, cắt có khai báo + đường đọc tiếp, nêu đích danh sheet chưa đọc) | Đang **trả về kết quả sai lệch âm thầm**. Không thêm phụ thuộc. Canh bằng `tests/test_read_silent_truncation.py` (12 test). | 2.1–2.3 |
 | 2 | OCR | Mở khóa toàn bộ nhóm hồ sơ scan — hiện là vùng mù hoàn toàn | 3.1 |
 | 3 | Đơn vị (`unit_tools`) | LLM đang tự quy đổi số kỹ thuật, trái nguyên tắc 1 | 3.6 |
 | 4 | Excel đầy đủ + snapshot | Bảng khối lượng mang con số tiền mà chưa có revision | 3.5 |
