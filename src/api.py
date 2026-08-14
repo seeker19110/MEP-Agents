@@ -77,8 +77,16 @@ def require_api_key(
     if authorization.lower().startswith("bearer "):
         token = authorization.split(" ", 1)[1].strip()
         if _jwt_enabled():
-            from src.auth_jwt import decode_access_token
+            from src.auth_jwt import decode_access_token, token_version_is_current
             claims = decode_access_token(token)  # ném HTTPException 401 nếu token sai
+            # Chữ ký đúng và chưa hết hạn vẫn CHƯA đủ: token có thể đã bị thu hồi (đổi
+            # mật khẩu, hạ quyền, khóa tài khoản). Không kiểm ở đây thì "thu hồi" chỉ là
+            # một dòng chữ trong CSDL, phiên của kẻ bị đuổi vẫn chạy tới lúc hết hạn.
+            if not token_version_is_current(claims):
+                raise HTTPException(
+                    status_code=401,
+                    detail="Token đã bị thu hồi (đổi mật khẩu, đổi vai trò, hoặc tài khoản bị khóa). Hãy đăng nhập lại.",
+                )
             return str(claims.get("sub") or SHARED_KEY_IDENTITY)
 
     if _API_KEY:
@@ -99,8 +107,83 @@ def require_api_key(
     return ANONYMOUS
 
 
-def require_quota(identity: str = Depends(require_api_key)) -> str:
-    """Xác thực + giới hạn tần suất. Dùng cho endpoint tạo việc nặng (đọc CAD, gọi LLM).
+def current_role(
+    x_api_key: str = Header(default=""),
+    api_key: str = "",
+    authorization: str = Header(default=""),
+) -> str:
+    """Vai trò của người gọi: `viewer` | `engineer` | `admin`.
+
+    Khóa chung và chế độ mở (dev cục bộ) đều tính là `admin` — cả hai vốn không phân biệt
+    được người dùng, nên gán vai trò thấp hơn chỉ làm hỏng các kịch bản đang chạy mà không
+    thêm an toàn nào. Phân quyền thật chỉ có ý nghĩa khi chạy JWT với CSDL người dùng.
+    """
+    from src.auth_jwt import decode_access_token
+    from src.users import DEFAULT_ROLE
+
+    if _jwt_enabled():
+        # Chạy chế độ JWT thì vai trò PHẢI đến từ token. Không có token hợp lệ thì trả
+        # vai trò thấp nhất, không phải "admin" — bản đầu của hàm này trả "admin" cho mọi
+        # request không có Bearer, nên khách nặc danh liệt kê được cả danh sách người
+        # dùng. Khóa chung vẫn được coi là admin (nó vốn là khóa cấp quản trị).
+        if authorization.lower().startswith("bearer "):
+            token = authorization.split(" ", 1)[1].strip()
+            try:
+                claims = decode_access_token(token)
+            except Exception:
+                return "viewer"  # token hỏng: quyền thấp nhất, phần xác thực chặn sau
+            return str(claims.get("role") or DEFAULT_ROLE)
+        if _API_KEY and (x_api_key == _API_KEY or api_key == _API_KEY):
+            return "admin"
+        return "viewer"
+
+    # Không bật JWT: hoặc là khóa chung (cấp quản trị), hoặc là chế độ mở dev cục bộ.
+    # Cả hai đều không phân biệt được người dùng nên phân quyền không có ý nghĩa.
+    return "admin"
+
+
+def require_engineer(role: str = Depends(current_role)) -> str:
+    """Chặn `viewer` khỏi các endpoint tạo việc nặng.
+
+    Người xem được đọc kết quả của mình, nhưng không được khởi động một lượt bóc khối
+    lượng: mỗi lượt tốn CPU đọc bản vẽ **và** tiền gọi LLM thật.
+    """
+    from src.users import role_allows
+
+    if not role_allows(role, "engineer"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Vai trò '{role}' không được phép tạo việc phân tích. Cần vai trò 'engineer' trở lên.",
+        )
+    return role
+
+
+def require_admin(
+    identity: str = Depends(require_api_key),
+    role: str = Depends(current_role),
+) -> str:
+    """Xác thực **và** kiểm quyền admin.
+
+    Phải phụ thuộc `require_api_key` chứ không chỉ `current_role`: bản đầu chỉ kiểm vai
+    trò, mà `current_role` lại trả "admin" cho request không có token — nên endpoint quản
+    lý người dùng **không hề xác thực**, khách nặc danh liệt kê được cả danh sách tài
+    khoản. Kiểm vai trò không thay được kiểm danh tính; phải có cả hai.
+    """
+    from src.users import role_allows
+
+    if not role_allows(role, "admin"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Vai trò '{role}' không được phép quản lý người dùng. Cần vai trò 'admin'.",
+        )
+    return role
+
+
+def require_quota(
+    identity: str = Depends(require_api_key),
+    role: str = Depends(require_engineer),
+) -> str:
+    """Xác thực + phân quyền + giới hạn tần suất. Dùng cho endpoint tạo việc nặng.
 
     Trả về danh tính y như `require_api_key` để endpoint dùng tiếp cho quyền sở hữu.
     """

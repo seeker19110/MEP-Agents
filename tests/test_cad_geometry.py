@@ -261,3 +261,46 @@ def test_parse_nominal_half_width_returns_none_when_no_size_found():
     assert parse_nominal_half_width("Ghi chú không có kích thước") is None
     assert parse_nominal_half_width("") is None
     assert parse_nominal_half_width(None) is None
+
+
+# --- Tê tại ngã ba khi tuyến chính BỊ TÁCH ở chỗ rẽ ---
+
+def test_tee_detected_when_main_run_is_split_at_the_branch():
+    """Ngã ba mà cả ba đoạn cùng kết thúc tại điểm rẽ vẫn phải là một TÊ.
+
+    Đây là cách vẽ phổ biến nhất: polyline tuyến chính có một vertex ngay chỗ rẽ, hoặc
+    họa viên vẽ từng đoạn một. Cách nhận tê cũ chỉ bắt trường hợp đầu mút nhánh chạm vào
+    THÂN tuyến chính, nên ở đây nó đếm 0 tê — mà khúc gãy 90° tại đúng chỗ đó lại bị tính
+    thành một CO. Bảng vật tư sai hai lần: thừa một co, thiếu một tê.
+    """
+    doc = ezdxf.new()
+    msp = doc.modelspace()
+    msp.add_line((0, 0), (3000, 0), dxfattribs={"layer": "PIPE"})      # tuyến chính, nửa trái
+    msp.add_line((3000, 0), (6000, 0), dxfattribs={"layer": "PIPE"})   # tuyến chính, nửa phải
+    msp.add_line((3000, 0), (3000, 4000), dxfattribs={"layer": "PIPE"})  # nhánh rẽ
+    fittings = detect_fittings(collect_segments(list(msp)))
+    assert fittings["PIPE"]["te"] == 1
+    assert fittings["PIPE"]["co"] == 0, "chỗ rẽ nhánh không được tính thành co"
+
+
+def test_cross_junction_counts_as_one_fitting():
+    """Ngã tư (bậc 4) là một phụ kiện, không phải hai."""
+    doc = ezdxf.new()
+    msp = doc.modelspace()
+    for start, end in [((0, 0), (3000, 0)), ((3000, 0), (6000, 0)),
+                       ((3000, 0), (3000, 3000)), ((3000, 0), (3000, -3000))]:
+        msp.add_line(start, end, dxfattribs={"layer": "PIPE"})
+    fittings = detect_fittings(collect_segments(list(msp)))
+    assert fittings["PIPE"]["te"] == 1
+    assert fittings["PIPE"]["co"] == 0
+
+
+def test_plain_corner_is_still_an_elbow_not_a_tee():
+    """Chốt ngược: bậc 2 đổi hướng vẫn phải là CO, việc sửa tê không được lấn sang."""
+    doc = ezdxf.new()
+    msp = doc.modelspace()
+    msp.add_line((0, 0), (3000, 0), dxfattribs={"layer": "PIPE"})
+    msp.add_line((3000, 0), (3000, 4000), dxfattribs={"layer": "PIPE"})
+    fittings = detect_fittings(collect_segments(list(msp)))
+    assert fittings["PIPE"]["co"] == 1
+    assert fittings["PIPE"]["te"] == 0

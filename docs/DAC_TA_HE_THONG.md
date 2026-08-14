@@ -5,8 +5,8 @@ gì, ràng buộc nào không được vi phạm, và chỗ nào hiện chưa đ
 đầy đủ ở [`RA_SOAT_LO_HONG.md`](RA_SOAT_LO_HONG.md) chứ không giấu trong văn xuôi.
 
 **Viết lại:** 2026-08-13, sau đợt quét toàn bộ `src/` và trả hết nợ kỹ thuật sửa được
-bằng code. **Mốc kiểm chứng:** `uv run pytest -q` → 654 đạt / 0 lỗi, 61 module `src/`,
-62 file test.
+bằng code. **Mốc kiểm chứng:** `uv run pytest -q` → 718 đạt / 0 lỗi, 62 module `src/`,
+65 file test.
 
 ---
 
@@ -82,7 +82,7 @@ mechanical electrical plumbing firefighting qs   cad    bim
 | **CAD** | `cad_loader.py`, `cad_geometry.py`, `cad_standards.py`, `cad_revision.py`, `cad_block_replace.py`, `cad_pipe_ops.py`, `cad_text_ops.py`, `cad_title_ops.py`, `cad_units.py`, `cad_macros.py`, `cad_batch_edit.py`, `cad_cache.py` | Đọc / sửa / tối ưu / chuẩn hóa / lưu revision bản vẽ |
 | **Tra cứu tiêu chuẩn** | `vectorstore.py`, `hybrid_search.py`, `local_embeddings.py`, `ingest.py` | RAG tiêu chuẩn TCVN/ASHRAE/NFPA |
 | **Hạ tầng** | `api.py`, `celery_app.py`, `auth_jwt.py`, `storage.py`, `checkpointer_factory.py`, `config.py`, `workspace.py`, `usage.py` | Cửa ngõ, hàng đợi, xác thực, lưu trữ, cấu hình |
-| **Chốt chặn tài nguyên** | `task_owner.py`, `rate_limit.py`, `task_events.py` | Quyền sở hữu task, giới hạn tần suất, kênh đẩy tiến độ |
+| **Người dùng & chốt chặn** | `users.py`, `auth_jwt.py`, `task_owner.py`, `rate_limit.py`, `task_events.py` | Tài khoản/vai trò/thu hồi token, quyền sở hữu task, giới hạn tần suất, kênh đẩy tiến độ |
 | **Nền** | `mepf_spec.py` | Chuẩn hóa ký hiệu MEPF. **KHÔNG được import module nào khác** |
 
 `mepf_spec.py` cố ý không có phụ thuộc: cả `tools.py` và `qs_tools.py` đều cần nó, mà hai
@@ -333,16 +333,26 @@ biết là đã cho qua).
 
 ### 7.4 Giới hạn còn lại — nói rõ để không ai hiểu nhầm
 
-- **Chưa có CSDL người dùng.** JWT hiện chỉ có một tài khoản bootstrap từ biến môi trường
-  (`verify_bootstrap_user`), không phân quyền theo vai trò, không thu hồi được token.
-- **Worker vẫn ghi vào thư mục chung** (`uploads/`, `data/boq/`) thay vì workspace riêng
-  từng người dùng.
+- **CSDL người dùng chạy SQLite**, chưa chuyển sang Postgres — chờ instance thật để chạy
+  thử, xem `TECH_DEBT.md` mục 1.
 - **Giới hạn tần suất đếm trong RAM từng tiến trình.** Chạy nhiều worker uvicorn thì hạn
   mức thực tế là `giới hạn × số worker`. Đây là chốt chặn chống lạm dụng vô ý, **không
   phải** phòng thủ trước tấn công từ chối dịch vụ — thứ đó cần bộ đếm dùng chung hoặc chặn
   ở tầng reverse proxy.
 
-Hai điều đầu là phần còn lại của việc đa người dùng (mục 6 của `TECH_DEBT.md`).
+### 7.5 Người dùng, vai trò, thu hồi token
+
+`src/users.py` giữ tài khoản (mật khẩu băm PBKDF2 có muối riêng), vai trò và số phiên bản
+token. Ba vai trò xếp bậc: `viewer` (chỉ xem kết quả của mình) → `engineer` (thêm quyền tạo
+việc phân tích, thứ tốn CPU và tiền LLM thật) → `admin` (thêm quyền quản lý người dùng).
+
+**Thu hồi token bằng `token_version`.** JWT mang `ver`; thu hồi = tăng số trong CSDL, mọi
+token cũ lập tức lệch và bị từ chối. Đổi mật khẩu, đổi vai trò và khóa tài khoản đều tự
+thu hồi — hạ quyền mà không thu hồi thì token cũ vẫn mang vai trò cũ.
+
+**Tài khoản bootstrap tắt khi đã có admin thật**, không phải khi "đã có người dùng": điều
+kiện sau khiến việc tạo một `viewer` đầu tiên khóa cứng cả hệ thống. Kèm chốt chặn không
+cho xóa/hạ quyền/khóa admin cuối cùng đang hoạt động.
 
 ---
 
@@ -397,7 +407,7 @@ Anthropic bỏ qua cache **trong im lặng**, bật lên chỉ tạo cảm giác
 
 ## 10. Bản đồ kiểm thử
 
-654 test trong 62 file. Nhóm theo thứ nó bảo vệ:
+718 test trong 65 file. Nhóm theo thứ nó bảo vệ:
 
 | Nhóm | File tiêu biểu | Bảo vệ điều gì |
 |---|---|---|
@@ -410,6 +420,9 @@ Anthropic bỏ qua cache **trong im lặng**, bật lên chỉ tạo cảm giác
 | Quyền sở hữu & hạn mức | `test_ownership_and_limits.py` | Không đọc được task của người khác; trần upload; giới hạn tần suất |
 | Không patch lúc import | `test_no_import_patching.py` | Tối ưu có tác dụng mà không cần nạp `src.graph`; danh tính hàm không đổi |
 | Kênh đẩy tiến độ | `test_task_events.py` | Pub/Sub chạy đúng **và** đường polling dự phòng còn nguyên |
+| Người dùng & phân quyền | `test_users.py` | Băm mật khẩu, ba vai trò, thu hồi token, chốt admin cuối cùng |
+| Workspace riêng | `test_user_workspace.py` | Hai người cùng tên file không ghi đè nhau |
+| Cảnh báo tính đôi | `test_double_line_detection.py` | Cảnh báo phải NỔ với bản vẽ vẽ tay, và không bắt nhầm |
 | Kiến trúc | `test_no_import_cycles.py`, `test_registry_consolidation.py`, `test_supervisor_pipeline.py`, `test_standards_backend.py` | Điểm nối không bị lách |
 | Vòng lặp điều phối | `test_review_retry_loop.py`, `test_routing.py`, `test_graph.py` | Không lặp vô tận, không auto-pass |
 | E2E | `test_e2e_takeoff.py` + `web/tests-ui/` (Playwright) | Luồng thật đầu-cuối |

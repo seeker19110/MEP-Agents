@@ -55,16 +55,34 @@ def parse_cad_to_db_task(self, dwg_path: str, user_id: str):
     Task phân tán: Bóc tách bản vẽ CAD nặng chuyển lên database.
     Được gọi qua `parse_cad_to_db_task.delay(dwg_path, user_id)`
     """
+    import shutil
+
     from src.tools import auto_quantity_takeoff
-    from src.workspace import get_project_root
+    from src.workspace import get_user_workspace, set_workspace_dir
 
-    # Ensure uploads dir exists
-    upload_dir = os.path.join(get_project_root(), "uploads")
-    os.makedirs(upload_dir, exist_ok=True)
+    # Workspace RIÊNG từng người. Trước đây mọi người ghi chung vào `uploads/` và
+    # `data/boq/`: bản vẽ và bảng khối lượng của khách này nằm cạnh khách kia, và hai
+    # người tải lên hai file trùng tên là ghi đè nhau trong im lặng. Tham số `user_id` vốn
+    # đã có trong chữ ký hàm nhưng bị bỏ đi không dùng.
+    workspace = get_user_workspace(user_id)
+    set_workspace_dir(workspace)
 
-    # Set output excel path
-    output_excel_path = os.path.join("data", "boq", f"boq_{os.path.basename(dwg_path)}.xlsx")
-    os.makedirs(os.path.dirname(output_excel_path), exist_ok=True)
+    # Đưa bản vẽ vào workspace của người dùng trước khi xử lý. Bắt buộc, không phải cho
+    # gọn: mọi tool đọc file đều đi qua `resolve_safe_path`, mà file nằm ngoài workspace
+    # sẽ bị chính hàm đó từ chối.
+    source = os.path.abspath(dwg_path)
+    local_name = os.path.basename(source)
+    local_path = os.path.join(workspace, local_name)
+    if source != os.path.abspath(local_path):
+        try:
+            shutil.copy2(source, local_path)
+        except FileNotFoundError:
+            _publish_event(self, {"status": "error", "logs": [f"Không tìm thấy file: {dwg_path}"]})
+            raise
+
+    boq_dir = os.path.join(workspace, "boq")
+    os.makedirs(boq_dir, exist_ok=True)
+    output_excel_path = os.path.join(boq_dir, f"boq_{local_name}.xlsx")
 
     # Báo tiến độ trước khi chạy phần nặng (auto_quantity_takeoff là 1 lệnh gọi đồng bộ,
     # không có hook tiến độ nội bộ, nên chỉ báo được ở mức "trước/sau" thay vì % thật).
@@ -83,7 +101,10 @@ def parse_cad_to_db_task(self, dwg_path: str, user_id: str):
     # Invoke StructuredTool
     try:
         result_text = auto_quantity_takeoff.invoke({
-            "file_path": dwg_path,
+            # Đọc bản SAO trong workspace, nhưng `result["file"]` bên dưới vẫn báo đúng
+            # đường dẫn khách gửi lên — đó mới là thứ khách nhận ra, bản sao là chi tiết
+            # nội bộ của Worker.
+            "file_path": local_path,
             "output_excel_path": output_excel_path
         })
     except Exception as e:

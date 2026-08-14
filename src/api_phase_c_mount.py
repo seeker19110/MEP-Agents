@@ -29,9 +29,13 @@ def apply_api_phase_c() -> None:
         return
 
     try:
-        from src.auth_jwt import build_auth_router
+        from src.auth_jwt import build_admin_router, build_auth_router
         api_mod.app.include_router(build_auth_router())
-        logger.info("Phase C JWT router mounted")
+        # Router quản lý người dùng nhận dependency kiểm quyền admin từ `src/api.py`.
+        # Truyền vào thay vì để `auth_jwt` import ngược `src.api` (vòng import), và để
+        # người đọc `api.py` thấy được chính chỗ khai quyền.
+        api_mod.app.include_router(build_admin_router(api_mod.require_admin))
+        logger.info("Phase C JWT + admin router mounted")
     except Exception as e:
         logger.warning("JWT router not mounted: %s", e)
 
