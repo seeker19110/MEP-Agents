@@ -118,3 +118,66 @@ def test_each_segment_pairs_at_most_once():
         for y in (0, 300, 600)
     ]
     assert detect_double_line_runs(segments)["DUCT"] == pytest.approx(5000.0)
+
+
+# --- Ngưỡng chỉnh được bằng cấu hình ---
+
+def test_thresholds_are_configurable(monkeypatch):
+    """Bốn ngưỡng hình học quyết định con số đi vào hồ sơ thầu, nên mỗi văn phòng phải
+    chỉnh được theo quy ước vẽ của mình mà không phải sửa code.
+
+    Xem `scripts/kiem_chung_hinh_hoc.py` để dò ngưỡng trên bộ bản vẽ thật.
+    """
+    import importlib
+
+    from src import cad_geometry
+
+    monkeypatch.setenv("PARALLEL_ANGLE_TOLERANCE_DEG", "6")
+    monkeypatch.setenv("DOUBLE_LINE_MAX_WIDTH_MM", "500")
+    monkeypatch.setenv("ELBOW_MIN_ANGLE_DEG", "45")
+    monkeypatch.setenv("PIPE_STOCK_LENGTH_MM", "3000")
+    # Cấu hình được đọc lúc import, nên phải nạp lại module để thấy giá trị mới.
+    reloaded = importlib.reload(cad_geometry)
+    try:
+        assert reloaded._PARALLEL_ANGLE_TOLERANCE_DEG == 6.0
+        assert reloaded.DEFAULT_DOUBLE_LINE_MAX_WIDTH == 500.0
+        assert reloaded.ELBOW_MIN_ANGLE_DEG == 45.0
+        assert reloaded.DEFAULT_PIPE_STOCK_LENGTH == 3000.0
+    finally:
+        monkeypatch.undo()
+        importlib.reload(cad_geometry)
+
+
+def test_widening_the_angle_tolerance_catches_more_pairs(monkeypatch):
+    """Nới góc song song thì bắt được cặp lệch nhiều hơn — chốt rằng ngưỡng THẬT SỰ có tác
+    dụng, không phải một biến đọc xong bỏ đấy."""
+    import importlib
+
+    from src import cad_geometry
+
+    assert _detected(0.0, 4.0) is False  # mặc định 2°: quá lệch
+
+    monkeypatch.setenv("PARALLEL_ANGLE_TOLERANCE_DEG", "6")
+    reloaded = importlib.reload(cad_geometry)
+    try:
+        pair = _parallel_pair(0.0, 4.0)
+        assert bool(reloaded.detect_double_line_runs(pair)) is True
+    finally:
+        monkeypatch.undo()
+        importlib.reload(cad_geometry)
+
+
+def test_invalid_threshold_falls_back_to_default(monkeypatch):
+    """Cấu hình sai kiểu không được làm sập hệ thống — rơi về mặc định, đúng nguyên tắc
+    graceful fallback của dự án."""
+    import importlib
+
+    from src import cad_geometry
+
+    monkeypatch.setenv("ELBOW_MIN_ANGLE_DEG", "khong-phai-so")
+    reloaded = importlib.reload(cad_geometry)
+    try:
+        assert reloaded.ELBOW_MIN_ANGLE_DEG == 15.0
+    finally:
+        monkeypatch.undo()
+        importlib.reload(cad_geometry)

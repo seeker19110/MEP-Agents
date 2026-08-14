@@ -356,6 +356,27 @@ Kiểm chứng trước khi sửa (hai đoạn song song cách nhau 300 mm, đ�
 **Hệ quả:** bảng khối lượng gấp đôi thực tế, không một dòng cảnh báo — đúng thứ
 `docs/DAC_TA_HE_THONG.md` mục 6 xếp là lỗi nghiêm trọng nhất của dự án.
 
+**Cách xử lý phần "không kiểm chứng được".** Hai sửa đổi hình học (mục này và mục 13) làm
+**đổi con số đi vào hồ sơ thầu**, mà môi trường viết code không có bản vẽ MEPF thật để đối
+chiếu. Không chờ được, nhưng cũng không được lặng lẽ áp. Ba việc làm cho rủi ro đó xử lý
+được:
+
+1. **Cảnh báo hiện rõ trong kết quả**, đã có sẵn: `auto_quantity_takeoff` in
+   `[CẢNH BÁO NGHIÊM TRỌNG] Phát hiện ~X m tuyến có thể đang được tính đôi...` kèm tên
+   layer. Kỹ sư thấy ngay chỗ cần xem lại thay vì phải tin con số.
+2. **Bốn ngưỡng chỉnh được bằng cấu hình** (`PARALLEL_ANGLE_TOLERANCE_DEG`,
+   `DOUBLE_LINE_MAX_WIDTH_MM`, `ELBOW_MIN_ANGLE_DEG`, `PIPE_STOCK_LENGTH_MM`) — mỗi văn
+   phòng vẽ một kiểu, và ngưỡng là thứ quyết định cảnh báo nổ hay không.
+3. **Công cụ đối chiếu** `scripts/kiem_chung_hinh_hoc.py`: chạy trên bộ bản vẽ thật, in ra
+   bảng co/tê/măng sông và cảnh báo tính đôi cho từng bản vẽ để so với hồ sơ đã bóc tay.
+   Cờ `--do-nhay` chạy lại với nhiều ngưỡng — con số ổn định qua nhiều ngưỡng là con số
+   đáng tin, con số nhảy mạnh nghĩa là bản vẽ nằm ngay ranh giới quy ước và chỗ đó phải do
+   kỹ sư quyết. Script **chỉ đọc**, không sửa bản vẽ.
+
+Việc còn lại là của người có bản vẽ: chạy script trên vài hồ sơ **đã được duyệt**, so từng
+dòng. Đó là bước duy nhất biến "logic đúng trên dữ liệu dựng tay" thành "đúng với hồ sơ
+của chúng ta".
+
 **Đã sửa:** so **hiệu góc thật** theo vòng tròn (mod 180) thay vì so số hiệu ô, và chuẩn
 hóa hướng mỗi đoạn về nửa mặt phẳng chuẩn trước khi tính khoảng lệch — hai vector ngược
 chiều cho `offset` trái dấu, nên không chuẩn hóa thì ngay cả khi so đúng cặp, khoảng lệch

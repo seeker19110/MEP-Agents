@@ -19,8 +19,42 @@ hệ quả sai số trong hồ sơ thật:
 
 Toàn bộ hàm ở đây là hình học thuần, không phụ thuộc LLM.
 """
+import logging
 import math
+import os
 import re
+
+
+def _tuned(setting_name: str, env_name: str, default: float) -> float:
+    """Ngưỡng hình học đọc từ cấu hình, rơi về mặc định khi không đặt.
+
+    Bốn ngưỡng dưới đây **quyết định con số đi vào hồ sơ thầu**: chúng định đoạt một cảnh
+    báo có nổ hay không và một chỗ gãy là co hay không. Giá trị mặc định phủ được quy ước
+    vẽ phổ biến ở Việt Nam, nhưng mỗi văn phòng vẽ một kiểu — chỉnh được bằng cấu hình là
+    điều kiện để kỹ sư đối chiếu với hồ sơ đã duyệt của chính mình mà không phải sửa code.
+
+    Xem `scripts/kiem_chung_hinh_hoc.py` để dò ngưỡng phù hợp trên bộ bản vẽ thật.
+
+    **Thứ tự ưu tiên: biến môi trường → `settings` → mặc định.** Đọc `settings` trước là
+    sai, và sai một cách im lặng: `settings` luôn có sẵn giá trị mặc định khác 0, nên
+    nhánh đó luôn thắng và biến môi trường **không bao giờ được đọc tới**. Đặt
+    `ELBOW_MIN_ANGLE_DEG=30` rồi chạy sẽ thấy hệ thống vẫn dùng 15 mà không báo gì.
+    """
+    raw = os.environ.get(env_name, "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            logging.getLogger(__name__).warning(
+                "Ngưỡng %s='%s' không phải số — dùng mặc định %s.", env_name, raw, default)
+    try:
+        from src.config import settings
+        value = getattr(settings, setting_name, None)
+        if value:
+            return float(value)
+    except Exception:
+        pass
+    return default
 
 # Sai số tọa độ coi như trùng điểm (đơn vị bản vẽ). Bản vẽ MEPF thường vẽ theo mm nên
 # 1 đơn vị là đủ chặt để nối tuyến mà vẫn bỏ qua lệch do làm tròn khi vẽ.
@@ -33,11 +67,14 @@ _DUCT_RE = re.compile(r"(?i)\b(?:W)?(\d+(?:\.\d+)?)\s*[xX\*]\s*(?:H)?(\d+(?:\.\d
 
 # Góc đổi hướng tối thiểu để coi là một co (elbow). Dưới ngưỡng này chỉ là tuyến gần
 # thẳng bị chia nhỏ vertex, không phải chỗ lắp phụ kiện.
-ELBOW_MIN_ANGLE_DEG = 15.0
+# Chỉnh bằng `ELBOW_MIN_ANGLE_DEG` (biến môi trường) hoặc `elbow_min_angle_deg` (.env).
+ELBOW_MIN_ANGLE_DEG = _tuned("elbow_min_angle_deg", "ELBOW_MIN_ANGLE_DEG", 15.0)
 
 # Chiều dài một cây ống thương phẩm (đơn vị bản vẽ giống bản vẽ). Dùng để suy số măng
 # sông (nối ống): cứ hết một cây là phải có một mối nối.
-DEFAULT_PIPE_STOCK_LENGTH = 6000.0  # 6 m theo mm
+# Chỉnh bằng `PIPE_STOCK_LENGTH_MM` / `pipe_stock_length_mm` — ống nhựa và ống thép bán
+# theo cây dài khác nhau, mà số măng sông tỉ lệ thẳng với con số này.
+DEFAULT_PIPE_STOCK_LENGTH = _tuned("pipe_stock_length_mm", "PIPE_STOCK_LENGTH_MM", 6000.0)
 
 
 def bulge_arc_length(x1: float, y1: float, x2: float, y2: float, bulge: float) -> float:
@@ -563,14 +600,17 @@ def insert_repeat_count(entity) -> int:
 # Khoảng cách tối đa giữa hai nét của cùng một tuyến vẽ kiểu 2 nét song song (đơn vị bản
 # vẽ, theo mm). 2000 mm phủ hết cỡ ống gió/ống nước thường gặp; xa hơn nữa thì hai nét
 # nhiều khả năng là hai tuyến riêng biệt chứ không phải hai mép của một tuyến.
-DEFAULT_DOUBLE_LINE_MAX_WIDTH = 2000.0
+DEFAULT_DOUBLE_LINE_MAX_WIDTH = _tuned(
+    "double_line_max_width_mm", "DOUBLE_LINE_MAX_WIDTH_MM", 2000.0)
 
 # Hai đoạn phải chồng nhau ít nhất bằng tỷ lệ này (trên đoạn ngắn hơn) mới coi là hai mép
 # của cùng một tuyến, tránh bắt nhầm hai tuyến chỉ tình cờ chạm nhau một khúc ngắn.
 _DOUBLE_LINE_MIN_OVERLAP_RATIO = 0.6
 
-# Sai lệch góc tối đa (độ) để coi hai đoạn là song song.
-_PARALLEL_ANGLE_TOLERANCE_DEG = 2.0
+# Sai lệch góc tối đa (độ) để coi hai đoạn là song song. Nới rộng thì bắt được cả bản vẽ
+# tay cẩu thả nhưng dễ báo nhầm hai tuyến riêng biệt; thu hẹp thì ngược lại.
+_PARALLEL_ANGLE_TOLERANCE_DEG = _tuned(
+    "parallel_angle_tolerance_deg", "PARALLEL_ANGLE_TOLERANCE_DEG", 2.0)
 
 
 def detect_double_line_runs(segments, max_width: float = DEFAULT_DOUBLE_LINE_MAX_WIDTH,
