@@ -136,6 +136,6 @@ uv run pytest tests/test_phase_d.py -q
 ## Lưu ý khi sửa Phase này
 
 Phase D vá đè lên module khác lúc import. Đã có một lỗi thật sinh ra từ kiểu nối này (đệ
-quy vô hạn khi đọc XREF, xem [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md) mục 4). Sau
+quy vô hạn khi đọc XREF, xem [`progress.md`](progress.md) mục 3.5). Sau
 mỗi thay đổi, **chạy đủ bộ test** (`uv run pytest -q`) chứ không chỉ `test_phase_d.py` —
 lỗi do ghép module không bao giờ lộ ra khi chạy riêng test của Phase.

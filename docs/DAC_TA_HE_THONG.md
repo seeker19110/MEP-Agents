@@ -461,7 +461,7 @@ Một thay đổi vi phạm bất kỳ dòng nào dưới đây thì phải bị
   Excel, DWG, AutoCAD, đơn vị, truy vấn dữ liệu): còn thiếu gì và làm theo thứ tự nào
 - [`DAC_TA_PIPELINE_BAN_VE.md`](DAC_TA_PIPELINE_BAN_VE.md) — tầng pipeline: upload → audit
   → sửa → QC → xuất bản vẽ → bóc khối lượng → dự toán; bằng chứng truy ngược của khối lượng
-- [`TIEN_DO_DU_AN.md`](TIEN_DO_DU_AN.md) — trạng thái thực tế, cái gì đã chạy thật
+- [`../progress.md`](../progress.md) — trạng thái thực tế (mục 3), cái gì đã chạy thật, và lộ trình chiến lược "Engineering OS"
 - [`../TECH_DEBT.md`](../TECH_DEBT.md) — nợ kỹ thuật và **vì sao chưa trả**
 - [`E2E.md`](E2E.md) — kịch bản end-to-end
 - [`../AI_MODEL_SETUP.md`](../AI_MODEL_SETUP.md) — chọn model cho từng vai trò

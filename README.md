@@ -174,8 +174,9 @@ Toàn bộ "suy nghĩ", thời gian thực thi và lỗi của từng tác nhân
 
 ## Tài liệu khác
 
-- [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md) — **trạng thái dự án hiện tại**: số
-  liệu, các Phase đã hợp nhất, việc còn nợ, đề xuất việc tiếp theo. Đọc file này trước.
+- [`progress.md`](progress.md) — **trạng thái dự án + lộ trình chiến lược**: mục 3 là số
+  liệu hiện tại, các Phase đã hợp nhất, việc còn nợ, đề xuất việc tiếp theo ngắn hạn; các
+  mục sau là tầm nhìn dài hạn "Engineering OS". Đọc file này trước.
 - [`AI_MODEL_SETUP.md`](AI_MODEL_SETUP.md) — chọn model theo vai trò, chế độ offline, chi phí.
 - [`TECH_DEBT.md`](TECH_DEBT.md) — nợ kỹ thuật: cái gì chưa làm và **vì sao chưa làm được**.
 - Tài liệu từng Phase: [`README_PHASE_A.md`](README_PHASE_A.md) (skill CAD/QS),
