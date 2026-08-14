@@ -458,9 +458,11 @@ là các việc **ngắn hạn** xếp theo tỉ lệ lợi ích / công sức, 
 3. **Kiểm thử kéo-thả file qua Web App trong trình duyệt thật** — Docker Compose đã chạy
    đạt luồng API/Worker, nhưng chưa test được thao tác kéo-thả qua UI thật (Đợt 8 ghi rõ
    "chưa test").
-4. **Bắt tay code Project Kernel** theo đặc tả
-   [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) — bước 1 ("schema +
-   module trơn") sau khi 4 câu hỏi ở mục 13 của đặc tả đó được duyệt.
+4. ~~Bắt tay code Project Kernel bước 1~~ — ✅ **Xong 2026-08-14**:
+   `src/project_kernel.py` + `tests/test_project_kernel.py` (20 test), đứng độc lập, chưa
+   nối vào tool/agent nào. Xem [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md)
+   mục 11. **Bước 2** (đường ghi thật opt-in nối vào `auto_quantity_takeoff`) vẫn chờ 4 câu
+   hỏi ở mục 13 của đặc tả đó được duyệt — chưa có câu trả lời chính thức nào.
 
 ---
 
@@ -575,9 +577,9 @@ Engineering OS chịu trách nhiệm:
 
 > **Đặc tả chi tiết (schema, stable ID, module surface, kế hoạch triển khai theo giai
 > đoạn, câu hỏi mở cần duyệt):** [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md).
-> Đây là bước 2 trong "Immediate implementation order" (mục 44) — đã có đặc tả, **chưa có
-> code**. Mục 13 của đặc tả đó liệt kê các câu hỏi cần người phụ trách duyệt trước khi bắt
-> đầu code.
+> Bước 1 ("schema + module trơn") **đã code** — `src/project_kernel.py`, đứng độc lập,
+> chưa nối tool/agent nào. Bước 2 (đường ghi thật, opt-in) chờ 4 câu hỏi ở mục 13 của đặc
+> tả đó được duyệt trước khi chạm vào bất kỳ tool hiện có nào.
 
 Project Kernel là “kernel” của Engineering OS.
 
@@ -1885,7 +1887,7 @@ Hệ thống phải thực hiện được toàn bộ workflow trên bằng stat
 | Standards RAG | 🟡 PARTIAL | Có retrieval, chưa phải structured compliance engine |
 | Digital Twin | ⬜ TODO | Core next milestone |
 | Engineering Graph | ⬜ TODO | Core next milestone |
-| Project Kernel + Canonical object model | 🟡 ĐẶC TẢ XONG | [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) — schema + module surface đã chốt, chưa code, chờ duyệt mục 13 |
+| Project Kernel + Canonical object model | 🟡 BƯỚC 1 XONG | `src/project_kernel.py` đứng độc lập, chưa nối tool/agent nào — [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) mục 11. Bước 2 chờ duyệt mục 13 |
 | Evidence engine | ⬜ TODO | Core next milestone |
 | Revision semantic model | 🟡 PARTIAL | CAD revision có, project-wide semantic revision chưa có |
 | Job/event platform | 🟡 PARTIAL | Có graph execution, chưa có platform job/event model |

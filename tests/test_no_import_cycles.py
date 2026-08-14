@@ -28,6 +28,7 @@ CORE_MODULES = [
     "src.agents",
     "src.graph",
     "src.api",
+    "src.project_kernel",
 ]
 
 
@@ -62,6 +63,22 @@ def test_qs_tools_khong_import_nguoc_len_tools():
                 "`src/qs_tools.py` import ngược lên `src.tools` ở mức module — vòng lặp "
                 f"quay lại: {stripped}. Hàm dùng chung nên đặt ở `src/mepf_spec.py`."
             )
+
+
+def test_project_kernel_khong_import_tools_hoac_agents():
+    """`src/project_kernel.py` đứng độc lập ở tầng Hạ tầng (đặc tả
+    `docs/DAC_TA_PROJECT_KERNEL.md` mục 10): được gọi TỪ tool, không được gọi ngược lên
+    `tools.py`/`agents.py`/`graph.py` — nối kiểu đó là mở đường cho đúng lớp lỗi "ghép sai
+    khi chạy chung" đã gặp ở PR #32."""
+    source = (ROOT / "src" / "project_kernel.py").read_text(encoding="utf-8")
+    forbidden = ("tools", "agents", "graph", "supervisor_pipeline")
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(("import src.", "from src.")):
+            continue
+        for name in forbidden:
+            if stripped.startswith(f"import src.{name}") or stripped.startswith(f"from src.{name} "):
+                pytest.fail(f"`src/project_kernel.py` không được import `src.{name}`: {stripped}")
 
 
 def test_khong_con_noqa_e402_do_vong_import():

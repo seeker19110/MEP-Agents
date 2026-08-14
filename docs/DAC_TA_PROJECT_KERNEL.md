@@ -1,13 +1,11 @@
 # Đặc tả: Project Kernel & Canonical Engineering Object Model
 
-> **Trạng thái tài liệu:** ĐẶC TẢ — chưa có code triển khai. Đây là bước 2 trong "Immediate
-> implementation order" của [`../progress.md`](../progress.md) mục 44 (bước 1 — regression
-> baseline — đã đạt: 756 test xanh, xác minh 2026-08-14). Mục đích: khóa schema và ranh
-> giới module **trước khi viết code**, để không phải sửa lại dữ liệu đã có người dùng thật
-> sau khi triển khai — đúng bài học đắt nhất của dự án này (`progress.md` mục 3.4–3.5: lỗi
-> XREF từ PR #32 sinh ra vì ghép hai module đúng riêng lẻ nhưng sai khi chạy chung).
->
-> **Người cần duyệt trước khi chuyển sang code:** xem mục 13.
+> **Trạng thái tài liệu:** Bước 1 ("schema + module trơn", mục 11) **đã có code** —
+> `src/project_kernel.py` + `tests/test_project_kernel.py` (781 test đạt/0 lỗi toàn bộ bộ
+> test, xác minh 2026-08-14). Module đứng **độc lập**, đúng như mục 10 quy định: chưa nối
+> vào `agents.py`/`graph.py`/`tools.py`, chưa có route API. Bước 2–4 (đường ghi thật opt-in,
+> route API, Digital Twin traversal) **vẫn chưa làm** — mục 13 liệt kê 4 câu hỏi nghiệp vụ
+> cần duyệt trước khi bước 2 chạm vào bất kỳ tool hiện có nào.
 
 ---
 
@@ -279,7 +277,13 @@ lặp lại); không cho phép nhảy lùi tùy ý (ví dụ `archived → activ
 hồi tường minh, không phải `UPDATE status`). Việc thực thi ràng buộc này thuộc về hàm
 `update_object_status()` ở mục 9, không phải kiểm tra ở tầng gọi.
 
-## 9. Module surface đề xuất: `src/project_kernel.py`
+## 9. Module surface: `src/project_kernel.py`
+
+> ✅ Đã triển khai (2026-08-14) — chữ ký hàm thật trong `src/project_kernel.py` khớp với
+> phác thảo dưới đây, cộng thêm vài hàm đọc phụ (`get_revision`, `get_source`) và các bước
+> kiểm tra ràng buộc (dự án/revision/parent phải tồn tại, `confidence` trong `0.0`–`1.0`)
+> mà bản phác thảo không liệt kê hết. Coi khối bên dưới là tài liệu thiết kế, đọc code thật
+> để biết chi tiết chính xác.
 
 Theo đúng khuôn của `src/users.py` — module docstring giải thích quyết định, `_connect()`
 riêng, `init_db()` idempotent, khóa `threading.Lock()` quanh ghi:
@@ -348,19 +352,21 @@ Hướng nối dự kiến cho **lượt code sau** (không làm ở đây, ch�
 - Workspace vẫn không đổi: `storage_key` trong bảng `sources` trỏ tới key trong
   `src/storage.py`, không trỏ thẳng tới path trên đĩa.
 
-## 11. Kế hoạch triển khai theo giai đoạn (cho lượt code sau)
+## 11. Kế hoạch triển khai theo giai đoạn
 
-1. **Schema + module trơn.** `src/project_kernel.py` với đủ hàm ở mục 9, `init_db()`, test
-   riêng (mục 12). Không có route API, không có tool nào gọi vào. Đứng độc lập như
-   `storage.py` lúc mới thêm.
-2. **Một đường ghi thật, opt-in.** Chọn đúng MỘT luồng hiện có (đề xuất:
+1. ✅ **Schema + module trơn** (2026-08-14). `src/project_kernel.py` với đủ hàm ở mục 9,
+   `init_db()`, `tests/test_project_kernel.py` (20 test: đường vui, cách ly dự án, bất biến
+   ID, vòng đời đối tượng, không ghi đè source, không tạo quan hệ trùng). Không có route
+   API, không có tool nào gọi vào — canh bằng `test_project_kernel_khong_import_tools_hoac_agents`
+   trong `tests/test_no_import_cycles.py`. Đứng độc lập như `storage.py` lúc mới thêm.
+2. ⬜ **Một đường ghi thật, opt-in.** Chọn đúng MỘT luồng hiện có (đề xuất:
    `auto_quantity_takeoff`) để thử ghi object vào kernel sau khi chạy xong, sau một cờ cấu
    hình tắt theo mặc định (`PROJECT_KERNEL_ENABLED=false` mặc định) — không đổi hành vi ai
    đang dùng hệ thống.
-3. **Route API + xác thực**, để web/Revit/AutoCAD plugin đọc được project state.
-4. **Digital Twin traversal / impact analysis** — chỉ sau khi có dữ liệu thật từ bước 2 để
-   biết `object_relations` thực tế trông ra sao, tránh thiết kế truy vấn cho dữ liệu tưởng
-   tượng.
+3. ⬜ **Route API + xác thực**, để web/Revit/AutoCAD plugin đọc được project state.
+4. ⬜ **Digital Twin traversal / impact analysis** — chỉ sau khi có dữ liệu thật từ bước 2
+   để biết `object_relations` thực tế trông ra sao, tránh thiết kế truy vấn cho dữ liệu
+   tưởng tượng.
 
 Không nhảy thẳng vào bước 3–4 trước khi bước 1–2 chạy đạt bằng dữ liệu thật — đúng
 `progress.md` mục 40.1 ("không rewrite vì muốn kiến trúc đẹp") áp theo chiều ngược: cũng
@@ -417,14 +423,27 @@ Theo văn hóa dự án (mọi PR chạy `uv run pytest -q` đủ bộ, không c
    nào là "đủ tin để đưa vào BOQ", tương tự cách `OCR_MIN_CONFIDENCE` đã cần đo bằng hồ sơ
    scan thật (`TECH_DEBT.md` mục 13) chứ không suy ra từ code.
 
-## 14. Tiêu chí "xong" của lượt đặc tả này
+## 14. Tiêu chí "xong"
 
-Khác với Definition of Done triển khai (`progress.md` mục 4, mục 45 — đó là cho code chạy
-thật), tiêu chí xong của **riêng tài liệu này** là:
+Tiêu chí xong của **đặc tả**:
 
 - [x] Schema đủ chi tiết để viết `CREATE TABLE` không cần đoán thêm.
 - [x] Phân biệt rõ `object_id` (bất biến) và `tag` (nghiệp vụ) — điểm dễ làm sai nhất.
 - [x] Có kế hoạch test trước khi có code (mục 12).
 - [x] Liệt kê tường minh câu hỏi mở thay vì tự quyết định thay người có chuyên môn (mục 13).
-- [ ] Người phụ trách dự án đọc và duyệt mục 13 — **chưa xảy ra ở lượt này**, cần xác nhận
-      trước khi bắt đầu mục 11 bước 1.
+
+Tiêu chí xong của **bước 1 ("schema + module trơn", mục 11)**:
+
+- [x] `src/project_kernel.py` khớp module surface mục 9.
+- [x] `tests/test_project_kernel.py` phủ đường vui, cách ly dự án, bất biến ID, vòng đời
+      đối tượng, không ghi đè source, không tạo quan hệ trùng.
+- [x] `uv run pytest -q` đủ bộ vẫn xanh (781 đạt/0 lỗi, 2026-08-14) — không chỉ test mới.
+- [x] Không nối vào `agents.py`/`graph.py`/`tools.py` — canh bằng
+      `test_project_kernel_khong_import_tools_hoac_agents`.
+
+**Lưu ý về mục 13:** bước 1 được code **trước khi** 4 câu hỏi ở mục 13 có câu trả lời
+chính thức — có chủ đích, vì cả 4 câu hỏi đó (schema `properties` theo discipline, quan hệ
+với revision CAD, mô hình quyền truy cập dự án, ngưỡng `confidence`) chỉ ảnh hưởng tới
+**bước 2 trở đi** (đường ghi thật nối vào tool, route API), không ảnh hưởng gì tới schema
+đứng độc lập của bước 1. **Mục 13 vẫn là điều kiện bắt buộc trước khi bắt đầu bước 2** —
+chưa có gì ở đó được coi là đã trả lời.

@@ -81,7 +81,7 @@ mechanical electrical plumbing firefighting qs   cad    bim
 | **Tool tính toán** | `hvac_tools.py`, `elec_tools.py`, `plumb_tools.py`, `ff_tools.py`, `qs_tools.py`, `bim_tools.py`, `panel_schedule.py` | Công thức kỹ thuật xác định — không có LLM ở đây |
 | **CAD** | `cad_loader.py`, `cad_geometry.py`, `cad_standards.py`, `cad_revision.py`, `cad_block_replace.py`, `cad_pipe_ops.py`, `cad_text_ops.py`, `cad_title_ops.py`, `cad_units.py`, `cad_macros.py`, `cad_batch_edit.py`, `cad_cache.py` | Đọc / sửa / tối ưu / chuẩn hóa / lưu revision bản vẽ |
 | **Tra cứu tiêu chuẩn** | `vectorstore.py`, `hybrid_search.py`, `local_embeddings.py`, `ingest.py` | RAG tiêu chuẩn TCVN/ASHRAE/NFPA |
-| **Hạ tầng** | `api.py`, `celery_app.py`, `auth_jwt.py`, `storage.py`, `checkpointer_factory.py`, `config.py`, `workspace.py`, `usage.py` | Cửa ngõ, hàng đợi, xác thực, lưu trữ, cấu hình |
+| **Hạ tầng** | `api.py`, `celery_app.py`, `auth_jwt.py`, `storage.py`, `checkpointer_factory.py`, `config.py`, `workspace.py`, `usage.py`, `project_kernel.py` | Cửa ngõ, hàng đợi, xác thực, lưu trữ, cấu hình. `project_kernel.py` là registry project/revision/source/object của Engineering OS — đứng độc lập, chưa nối tool/agent nào (xem `DAC_TA_PROJECT_KERNEL.md`) |
 | **Người dùng & chốt chặn** | `users.py`, `auth_jwt.py`, `task_owner.py`, `rate_limit.py`, `task_events.py` | Tài khoản/vai trò/thu hồi token, quyền sở hữu task, giới hạn tần suất, kênh đẩy tiến độ |
 | **Nền** | `mepf_spec.py` | Chuẩn hóa ký hiệu MEPF. **KHÔNG được import module nào khác** |
 
