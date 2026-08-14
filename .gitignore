@@ -27,3 +27,6 @@ uploads/
 # CSDL người dùng sinh ra lúc chạy — không bao giờ commit (chứa hash mật khẩu thật)
 data/users.sqlite
 data/workspaces/
+
+# CSDL Project Kernel sinh ra lúc chạy (src/project_kernel.py) — không commit
+data/project_kernel.sqlite
