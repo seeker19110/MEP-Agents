@@ -462,6 +462,8 @@ Một thay đổi vi phạm bất kỳ dòng nào dưới đây thì phải bị
 - [`DAC_TA_PIPELINE_BAN_VE.md`](DAC_TA_PIPELINE_BAN_VE.md) — tầng pipeline: upload → audit
   → sửa → QC → xuất bản vẽ → bóc khối lượng → dự toán; bằng chứng truy ngược của khối lượng
 - [`../progress.md`](../progress.md) — trạng thái thực tế (mục 3), cái gì đã chạy thật, và lộ trình chiến lược "Engineering OS"
+- [`DAC_TA_PROJECT_KERNEL.md`](DAC_TA_PROJECT_KERNEL.md) — đặc tả Project Kernel + Canonical
+  Engineering Object Model (P0 đầu tiên của Engineering OS), chưa có code triển khai
 - [`../TECH_DEBT.md`](../TECH_DEBT.md) — nợ kỹ thuật và **vì sao chưa trả**
 - [`E2E.md`](E2E.md) — kịch bản end-to-end
 - [`../AI_MODEL_SETUP.md`](../AI_MODEL_SETUP.md) — chọn model cho từng vai trò

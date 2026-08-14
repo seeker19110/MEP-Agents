@@ -549,6 +549,12 @@ Engineering OS chịu trách nhiệm:
 
 ## 7.1 Project Kernel
 
+> **Đặc tả chi tiết (schema, stable ID, module surface, kế hoạch triển khai theo giai
+> đoạn, câu hỏi mở cần duyệt):** [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md).
+> Đây là bước 2 trong "Immediate implementation order" (mục 44) — đã có đặc tả, **chưa có
+> code**. Mục 13 của đặc tả đó liệt kê các câu hỏi cần người phụ trách duyệt trước khi bắt
+> đầu code.
+
 Project Kernel là “kernel” của Engineering OS.
 
 Chức năng:
@@ -714,6 +720,9 @@ Estimate
 ---
 
 # 10. Canonical Engineering Object Model
+
+> Đặc tả cụ thể hóa thành schema SQLite (bảng `engineering_objects`, phân biệt `object_id`
+> bất biến với `tag` nghiệp vụ) nằm ở [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) mục 6.4 và 7.
 
 Mọi discipline dùng chung object contract.
 
@@ -1852,7 +1861,7 @@ Hệ thống phải thực hiện được toàn bộ workflow trên bằng stat
 | Standards RAG | 🟡 PARTIAL | Có retrieval, chưa phải structured compliance engine |
 | Digital Twin | ⬜ TODO | Core next milestone |
 | Engineering Graph | ⬜ TODO | Core next milestone |
-| Canonical object model | ⬜ TODO | Core next milestone |
+| Project Kernel + Canonical object model | 🟡 ĐẶC TẢ XONG | [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) — schema + module surface đã chốt, chưa code, chờ duyệt mục 13 |
 | Evidence engine | ⬜ TODO | Core next milestone |
 | Revision semantic model | 🟡 PARTIAL | CAD revision có, project-wide semantic revision chưa có |
 | Job/event platform | 🟡 PARTIAL | Có graph execution, chưa có platform job/event model |
