@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     yolo_weights: str = ""
     yolo_confidence: float = 0.25
 
+    # Ngưỡng để src/project_kernel.py::try_auto_activate() tự chuyển đối tượng
+    # validated -> active. Mặc định kỹ thuật, chưa hiệu chỉnh bằng dữ liệu thật — xem
+    # quyết định #4 trong docstring của project_kernel.py.
+    project_kernel_auto_activate_confidence: float = 0.8
+
     agent_message_window: int = 24
     max_tool_result_chars: int = 6000
     cad_cache_max: int = 8

@@ -1,11 +1,13 @@
 # Đặc tả: Project Kernel & Canonical Engineering Object Model
 
-> **Trạng thái tài liệu:** Bước 1 ("schema + module trơn", mục 11) **đã có code** —
-> `src/project_kernel.py` + `tests/test_project_kernel.py` (781 test đạt/0 lỗi toàn bộ bộ
-> test, xác minh 2026-08-14). Module đứng **độc lập**, đúng như mục 10 quy định: chưa nối
-> vào `agents.py`/`graph.py`/`tools.py`, chưa có route API. Bước 2–4 (đường ghi thật opt-in,
-> route API, Digital Twin traversal) **vẫn chưa làm** — mục 13 liệt kê 4 câu hỏi nghiệp vụ
-> cần duyệt trước khi bước 2 chạm vào bất kỳ tool hiện có nào.
+> **Trạng thái tài liệu:** Bước 1 ("schema + module trơn", mục 11) **đã có code**, cả 4 câu
+> hỏi nghiệp vụ ở mục 13 (gốc) **đã được quyết** (2026-08-14) và triển khai —
+> `src/project_kernel.py` + `tests/test_project_kernel.py` (47 test) +
+> `tests/test_project_kernel_postgres.py` (8 test, **chạy thật** trên Postgres 16 cục bộ,
+> không phải chỉ viết cú pháp). Toàn bộ bộ test dự án: 801 đạt/0 lỗi khi có
+> `TEST_DATABASE_URL`, 793 đạt/8 skip khi không có (đúng kiểu graceful skip như test OCR).
+> Module vẫn đứng **độc lập** — chưa nối vào `agents.py`/`graph.py`/`tools.py`, chưa có
+> route API (mục 10, 11 bước 2–4). Xem mục 13 để biết quyết định cụ thể cho từng câu hỏi.
 
 ---
 
@@ -102,23 +104,41 @@ agent dùng chung.
   (không đổi ở lượt này)                                 opt-in, mục 11 bước 3)
 ```
 
-## 5. Lưu trữ: SQLite trước, Postgres để ngỏ
+## 5. Lưu trữ: SQLite mặc định, Postgres khi có instance thật ✅ Cả hai đã chạy thử
 
-Giống hệt quyết định đã đưa ra trong `src/users.py` (mục "Ba quyết định thiết kế" ở đầu
-file đó), và vì cùng một lý do:
+Khi viết đặc tả, quyết định là "SQLite trước, Postgres để ngỏ" — cùng lý do đã ghi ở
+`src/users.py`, và vì lúc đó **chưa có instance Postgres thật để chạy thử**
+(`TECH_DEBT.md` mục 1). Môi trường code hiện tại có Postgres 16 cài sẵn, nên quyết định đã
+tiến thêm một bước: **cả hai backend đều đã triển khai và chạy thử thật**, không còn là kế
+hoạch để ngỏ.
 
-- SQLite qua `sqlite3` thư viện chuẩn — dự án đã dùng cho `users.sqlite` và checkpoint
-  LangGraph, không thêm phụ thuộc.
-- `DATABASE_URL` trong `config.py` để ngỏ cho Postgres, **cố ý chưa hiện thực** — viết
-  schema Postgres mà không có instance thật để chạy thử là đoán mò (`TECH_DEBT.md` mục 1).
-- Toàn bộ truy vấn đi qua module `src/project_kernel.py` như một lớp mỏng (xem mục 9);
-  thêm backend Postgres sau này không đổi chữ ký hàm gọi từ nơi khác.
-- Đường dẫn file đọc qua biến môi trường có mặc định, theo đúng khuôn `db_path()` của
-  `users.py`: `PROJECT_KERNEL_DB_PATH`, mặc định `data/project_kernel.sqlite`.
-
-**Vì sao không dùng chung file `users.sqlite`:** tách file để hai schema độc lập không
-khóa lẫn nhau khi ghi đồng thời (SQLite khóa ở mức file/database), và để xóa thử nghiệm
-CSDL dự án (khi phát triển) không đụng tới tài khoản người dùng thật.
+- **Mặc định (không có `DATABASE_URL`):** SQLite qua `sqlite3` thư viện chuẩn — cùng lựa
+  chọn `src/users.py`, không thêm phụ thuộc. Đường dẫn qua `PROJECT_KERNEL_DB_PATH`, mặc
+  định `data/project_kernel.sqlite`. Tách file riêng với `users.sqlite` để hai schema độc
+  lập không khóa lẫn nhau khi ghi đồng thời, và xóa thử CSDL dự án lúc phát triển không
+  đụng tài khoản người dùng thật.
+- **Có `DATABASE_URL` thật + đã cài `psycopg`** (`uv sync --extra phase-c`, nhóm phụ thuộc
+  đã có sẵn trong `pyproject.toml`, không phải thêm mới): dùng Postgres — đúng khuôn
+  `src/checkpointer_factory.py::try_postgres_checkpointer` (Postgres nếu cấu hình được, rơi
+  về SQLite nếu thiếu `DATABASE_URL` hoặc thiếu `psycopg`, không sập).
+- **Không viết SQL hai lần theo dialect.** Toàn bộ câu lệnh DML dùng chung placeholder `?`;
+  `_exec()` là điểm duy nhất dịch sang `%s` khi backend là Postgres. DDL (`CREATE TABLE`)
+  portable sẵn giữa hai dialect vì mọi khóa chính là `TEXT` (uuid4), không dùng
+  `AUTOINCREMENT`/`SERIAL`. Hai chỗ khác nhau thật sự: `INSERT OR IGNORE` (SQLite) so với
+  `INSERT ... ON CONFLICT DO NOTHING` (Postgres) — gói trong `_insert_ignore()`; và kiểu
+  lỗi va chạm khóa (`sqlite3.IntegrityError` so với `psycopg.errors.UniqueViolation`) —
+  gói trong `_is_unique_violation()`.
+- **Đã chạy thử thật, không chỉ viết cú pháp:** `tests/test_project_kernel_postgres.py` (8
+  test) chạy trên một instance Postgres 16 cục bộ thật khi có biến môi trường
+  `TEST_DATABASE_URL`, dùng một schema Postgres riêng cho mỗi test (tạo/xóa quanh test,
+  cùng tinh thần cô lập với `tmp_path` của nhánh SQLite). Không có biến đó thì test tự
+  `skip`, không fail — đúng cách các test phụ thuộc hạ tầng khác trong dự án xử lý (VD test
+  OCR bỏ qua khi thiếu `tesseract-ocr`).
+- **Chưa kiểm chứng** (thành thật, không tự nhận hơn những gì đã đo): concurrency thật của
+  nhiều Celery worker cùng ghi (test ở trên chạy tuần tự trong một tiến trình), Postgres
+  quản lý (RDS/Cloud SQL) với độ trễ mạng thật, connection pooling (mỗi lời gọi vẫn mở
+  connection mới, giống hệt cách `users.py` làm với SQLite — chưa thành vấn đề ở quy mô
+  hiện tại nhưng sẽ cần `psycopg_pool` nếu Project Kernel bị gọi tần suất cao).
 
 ## 6. Schema dữ liệu
 
@@ -230,6 +250,22 @@ vi, xem mục 2).
 Khóa chính composite `(from_id, to_id, relation_type, revision_id)` — cùng một cặp đối
 tượng có thể có nhiều loại quan hệ (`powered_by` và `near` cùng lúc), nhưng không trùng loại.
 
+### 6.7 `project_members` — trả lời quyết định #3 ở mục 13
+
+Thêm sau khi mục 13 (bản gốc) được quyết — không có trong bản đặc tả ban đầu.
+
+| Cột | Kiểu | Ghi chú |
+|---|---|---|
+| `project_id` | TEXT NOT NULL | |
+| `username` | TEXT NOT NULL | Không tham chiếu tới `users.sqlite` — cố ý tách khỏi CSDL người dùng (xem mục 13) |
+| `role` | TEXT NOT NULL DEFAULT `'engineer'` | `viewer` \| `engineer` \| `admin` — cùng tên với `users.ROLES` nhưng phạm vi riêng từng dự án |
+| `added_at` | INTEGER NOT NULL | |
+
+Khóa chính composite `(project_id, username)`. `create_project` tự thêm `owner` làm thành
+viên `admin` đầu tiên. Thêm lại một `username` đã có thì **cập nhật vai trò** (upsert qua
+`ON CONFLICT ... DO UPDATE`) — khác với `sources` (mục 6.3), nơi ghi đè bị cấm tuyệt đối:
+đổi vai trò thành viên là thao tác hợp lệ, đổi nội dung một file nguồn thì không.
+
 ## 7. Stable ID: quy tắc sinh và bất biến
 
 Hai khái niệm tách biệt, dễ nhầm nếu gộp làm một:
@@ -311,6 +347,16 @@ def get_active_revision(project_id: str) -> dict | None: ...
 def register_source(project_id: str, kind: str, storage_key: str,
                      uploaded_by: str, checksum: str = "") -> dict: ...
 
+# --- Thành viên dự án (quyết định #3, mục 13) ---
+def add_project_member(project_id: str, username: str, role: str = "engineer") -> dict: ...
+def remove_project_member(project_id: str, username: str) -> None: ...
+def list_project_members(project_id: str) -> list[dict]: ...
+def get_member_role(project_id: str, username: str) -> str | None: ...
+
+# --- Schema properties theo type (quyết định #1, mục 13) ---
+def register_property_schema(type_: str, required_fields: list[str] | tuple[str, ...]) -> None: ...
+def get_property_schema(type_: str) -> tuple[str, ...]: ...
+
 # --- Object ---
 def register_object(project_id: str, revision_id: str, type: str, discipline: str,
                      tag: str = "", parent_id: str | None = None,
@@ -320,6 +366,8 @@ def list_objects(project_id: str, revision_id: str | None = None,
                   type: str | None = None, discipline: str | None = None) -> list[dict]: ...
 def update_object_status(object_id: str, new_status: str) -> None:
     """Ném ValueError nếu chuyển trạng thái không hợp lệ — xem bảng mục 8."""
+def try_auto_activate(object_id: str) -> bool:
+    """Tự chuyển validated -> active nếu confidence đạt ngưỡng cấu hình (quyết định #4)."""
 
 # --- Source ref & relation ---
 def attach_source_ref(object_id: str, source_id: str, locator: str = "") -> None: ...
@@ -394,56 +442,73 @@ Theo văn hóa dự án (mọi PR chạy `uv run pytest -q` đủ bộ, không c
 - Test cách ly khỏi CSDL người dùng thật: dùng `PROJECT_KERNEL_DB_PATH` trỏ file tạm trong
   `tmp_path` của pytest, đúng cách `tests/test_users.py` (nếu có) hoặc `test_api.py` đang
   cô lập `USER_DB_PATH`/`UPLOAD_DIR`.
+- **`tests/test_project_kernel_postgres.py`** (file mới, thêm sau khi mục 13 được quyết):
+  chạy lại một tập rút gọn (không phải toàn bộ 47 test — chỉ phần khác biệt thật giữa hai
+  backend) trên Postgres 16 thật khi có `TEST_DATABASE_URL`; tự `skip` khi không có. Cô lập
+  bằng một schema Postgres riêng mỗi test (tạo/xóa quanh test), cùng tinh thần `tmp_path`
+  của nhánh SQLite.
 
-## 13. Việc CHƯA quyết — cần người duyệt trước khi viết code
+## 13. Bốn câu hỏi nghiệp vụ — ĐÃ QUYẾT (2026-08-14)
 
-Đây là lý do đặc tả này dừng ở mức thiết kế, không tự chuyển sang code:
+Mục này ban đầu liệt kê 4 câu hỏi chưa có câu trả lời, chặn việc bắt đầu bước 2. Đã quyết
+theo hướng "xây đúng cơ chế, không đoán thay chuyên môn" — chi tiết kỹ thuật ở docstring
+đầu `src/project_kernel.py`, tóm tắt quyết định + lý do ở đây:
 
-1. **Schema JSON cụ thể của `properties` theo từng discipline chưa tồn tại.** Ví dụ AHU
-   cần `{"cong_suat_lanh_kw": ..., "luu_luong_gio_m3h": ...}`, đoạn ống cần
-   `{"duong_kinh_mm": ..., "vat_lieu": ...}` — mỗi discipline một schema riêng, và hiện
-   chưa có ai duyệt danh sách trường bắt buộc cho từng `type`. Khóa cứng JSON Schema cho
-   từng loại mà chưa có đủ ví dụ thực tế từ `hvac_tools.py`/`elec_tools.py`/... là đoán mò.
-   **Đề xuất:** lượt code đầu chỉ ép `properties` là JSON hợp lệ (không rỗng schema), việc
-   chuẩn hóa trường bắt buộc theo `type` để lại cho lượt sau khi đã có dữ liệu thật từ bước
-   2 ở mục 11.
-2. **Quan hệ giữa "revision của dự án" (mục 6.2) và "revision của file CAD"
-   (`cad_revision.py`) chưa rõ.** Một revision dự án có thể gồm nhiều lần sửa file CAD lẻ
-   tẻ (`snapshot_cad` gọi nhiều lần) trước khi "chốt" thành một revision dự án — cần người
-   quyết định ngưỡng "chốt" đó là gì (thủ công bấm nút, hay tự động theo phiên làm việc).
-   Không đoán ở đây; mục 11 bước 2 cố ý chọn `auto_quantity_takeoff` (không sửa file) để
-   tránh đụng câu hỏi này trước.
-3. **Cơ chế cách ly dự án chưa gắn với cách ly người dùng hiện có.** `workspace.py` cô lập
-   theo `user_id`; Project Kernel cô lập theo `project_id`. Một dự án có nhiều người dùng
-   cộng tác (kỹ sư + kiểm duyệt) chưa có mô hình quyền truy cập — hiện `owner` trong bảng
-   `projects` (mục 6.1) chỉ là một chuỗi, chưa có bảng `project_members`. Để lại cho đặc tả
-   quyền truy cập riêng, không giải quyết ở đây.
-4. **Ngưỡng `confidence` dùng để làm gì** (chặn tự động chuyển `active`? chỉ hiển thị cảnh
-   báo?) chưa có quyết định nghiệp vụ — cần người có kinh nghiệm QS/thiết kế xác nhận mức
-   nào là "đủ tin để đưa vào BOQ", tương tự cách `OCR_MIN_CONFIDENCE` đã cần đo bằng hồ sơ
-   scan thật (`TECH_DEBT.md` mục 13) chứ không suy ra từ code.
+1. **Schema `properties` theo discipline — QUYẾT: điểm mở rộng, không hardcode.**
+   `register_property_schema(type_, required_fields)` cho phép mỗi discipline module tự
+   đăng ký trường bắt buộc cho `type` của mình (cùng khuôn `standards_backend.register_backend`).
+   **Lý do không khóa cứng JSON Schema cho AHU/pump/cáp...:** vẫn đúng như đặc tả gốc nói —
+   chưa ai duyệt danh sách trường, đoán là sai văn hóa dự án. Nhưng KHÔNG đoán không có
+   nghĩa là không xây được gì: cái thiếu là *danh sách trường cụ thể*, không phải *cơ chế
+   ép trường bắt buộc*. Xây cơ chế trước, để trống nội dung schema cho tới khi discipline
+   module thật đăng ký — đây là hướng "chất lượng cao nhất" mà không đoán domain.
+2. **Quan hệ với revision file CAD — QUYẾT: giữ tách biệt, không tự động hóa.** Revision dự
+   án (mục 6.2) và revision file CAD (`cad_revision.py`) là hai khái niệm độc lập theo
+   thiết kế, không phải "chưa quyết được nên tạm tách" — quyết định CHÍNH LÀ tách. Bước 2
+   (khi nối vào tool) sẽ không tự tạo revision dự án từ `snapshot_cad`; việc "chốt" một
+   revision dự án luôn là hành động tường minh của người gọi (tool/route), không suy luận
+   ngầm trong kernel. Không cần thêm cột/bảng nào để nối hai khái niệm này.
+3. **Mô hình quyền truy cập dự án — QUYẾT: bảng `project_members`.** Đã thêm (mục 6.7):
+   `project_id`/`username`/`role`, 3 vai trò cùng tên `users.ROLES` nhưng phạm vi riêng
+   từng dự án. `create_project` tự thêm owner làm `admin` đầu tiên. **Không** tái dùng vai
+   trò hệ thống của `users.py` trực tiếp — một người có thể là `viewer` hệ thống nhưng
+   `admin` của dự án họ tạo; gắn cứng hai khái niệm sẽ sai khi công ty có nhiều dự án phân
+   quyền khác nhau cho cùng một người.
+4. **Ngưỡng `confidence` — QUYẾT: `PROJECT_KERNEL_AUTO_ACTIVATE_CONFIDENCE`, mặc định
+   0.8.** `try_auto_activate()` tự chuyển `validated` → `active` nếu đạt ngưỡng, giữ nguyên
+   `validated` (chờ người duyệt) nếu chưa đạt. **Ranh giới thành thật:** đây là ngưỡng MẶC
+   ĐỊNH kỹ thuật hợp lý (giống `OCR_MIN_CONFIDENCE` = 60 lúc mới thêm), KHÔNG phải số đã
+   được người có kinh nghiệm QS/thiết kế đo bằng dữ liệu thật — đúng ranh giới
+   `TECH_DEBT.md` mục 13 đã từng vạch ra cho OCR. Cấu hình được qua `config.py`, không phải
+   hardcode, nên hiệu chỉnh sau này không cần sửa code.
+
+Cả 4 quyết định đã có test thật (`tests/test_project_kernel.py`, phần "Quyết định #1–#4"),
+kể cả trên backend Postgres (`tests/test_project_kernel_postgres.py`).
 
 ## 14. Tiêu chí "xong"
 
-Tiêu chí xong của **đặc tả**:
+Tiêu chí xong của **đặc tả gốc**:
 
 - [x] Schema đủ chi tiết để viết `CREATE TABLE` không cần đoán thêm.
 - [x] Phân biệt rõ `object_id` (bất biến) và `tag` (nghiệp vụ) — điểm dễ làm sai nhất.
 - [x] Có kế hoạch test trước khi có code (mục 12).
-- [x] Liệt kê tường minh câu hỏi mở thay vì tự quyết định thay người có chuyên môn (mục 13).
+- [x] Liệt kê tường minh câu hỏi mở thay vì tự quyết định thay người có chuyên môn — sau đó
+      đã quyết theo hướng "xây cơ chế, không đoán nội dung domain" (mục 13).
 
-Tiêu chí xong của **bước 1 ("schema + module trơn", mục 11)**:
+Tiêu chí xong của **bước 1 ("schema + module trơn", mục 11) + 4 quyết định mục 13**:
 
-- [x] `src/project_kernel.py` khớp module surface mục 9.
-- [x] `tests/test_project_kernel.py` phủ đường vui, cách ly dự án, bất biến ID, vòng đời
-      đối tượng, không ghi đè source, không tạo quan hệ trùng.
-- [x] `uv run pytest -q` đủ bộ vẫn xanh (781 đạt/0 lỗi, 2026-08-14) — không chỉ test mới.
+- [x] `src/project_kernel.py` khớp module surface mục 9, gồm cả phần mở rộng cho 4 quyết định.
+- [x] `tests/test_project_kernel.py` (47 test): đường vui, cách ly dự án, bất biến ID, vòng
+      đời đối tượng, không ghi đè source, không tạo quan hệ trùng, registry schema
+      properties, thành viên dự án, tự động active theo ngưỡng confidence.
+- [x] `tests/test_project_kernel_postgres.py` (8 test): **chạy thật** trên Postgres 16 cục
+      bộ khi có `TEST_DATABASE_URL`, tự `skip` khi không có.
+- [x] `uv run pytest -q` đủ bộ vẫn xanh — 793 đạt/8 skip (không có `TEST_DATABASE_URL`),
+      801 đạt/0 skip (có) — 2026-08-14. Không chỉ test mới.
 - [x] Không nối vào `agents.py`/`graph.py`/`tools.py` — canh bằng
       `test_project_kernel_khong_import_tools_hoac_agents`.
 
-**Lưu ý về mục 13:** bước 1 được code **trước khi** 4 câu hỏi ở mục 13 có câu trả lời
-chính thức — có chủ đích, vì cả 4 câu hỏi đó (schema `properties` theo discipline, quan hệ
-với revision CAD, mô hình quyền truy cập dự án, ngưỡng `confidence`) chỉ ảnh hưởng tới
-**bước 2 trở đi** (đường ghi thật nối vào tool, route API), không ảnh hưởng gì tới schema
-đứng độc lập của bước 1. **Mục 13 vẫn là điều kiện bắt buộc trước khi bắt đầu bước 2** —
-chưa có gì ở đó được coi là đã trả lời.
+**Còn lại trước khi bước 2 (nối vào tool thật):** không còn câu hỏi thiết kế nào ở mục 13,
+nhưng bước 2 vẫn là việc CHƯA làm — chọn đúng một luồng hiện có để nối (mục 11 đề xuất
+`auto_quantity_takeoff`), sau cờ tắt mặc định, và cần review riêng vì lần đầu Project Kernel
+chạm vào code đang phục vụ người dùng thật.

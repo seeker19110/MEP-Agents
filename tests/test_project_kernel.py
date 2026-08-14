@@ -4,8 +4,6 @@ Bước 1 ("schema + module trơn") của đặc tả `docs/DAC_TA_PROJECT_KERNE
 độc lập (canh ở `test_no_import_cycles.py`), chưa có tool/route nào gọi vào — test ở đây
 chỉ kiểm chứng bản thân registry, đúng phạm vi mục 12 của đặc tả.
 """
-import sqlite3
-
 import pytest
 
 from src import project_kernel as pk
@@ -15,8 +13,11 @@ from src import project_kernel as pk
 def clean_db(tmp_path, monkeypatch):
     """Mỗi test một file CSDL riêng — không test nào thấy dữ liệu của test khác."""
     monkeypatch.setenv("PROJECT_KERNEL_DB_PATH", str(tmp_path / "project_kernel.sqlite"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    pk.reset_property_schemas_for_tests()
     pk.init_db()
     yield
+    pk.reset_property_schemas_for_tests()
 
 
 @pytest.fixture
@@ -263,3 +264,116 @@ def test_khong_dung_chung_file_csdl_nguoi_dung(tmp_path, monkeypatch):
 def test_khong_co_ham_xoa_cung_doi_tuong():
     """Đúng mục 9 đặc tả: không có `delete_object` — chỉ chuyển trạng thái."""
     assert not hasattr(pk, "delete_object")
+
+
+# --- Quyết định #1 (mục 13 đặc tả): registry schema properties theo type ---
+
+def test_type_chua_dang_ky_schema_khong_bi_ep_truong_nao(project, revision):
+    """Hành vi mặc định (chưa đăng ký) phải giống hệt trước khi có registry này."""
+    obj = pk.register_object(project["project_id"], revision["revision_id"], type="ahu",
+                              discipline="mechanical", properties={})
+    assert obj["properties"] == {}
+
+
+def test_dang_ky_schema_ep_truong_bat_buoc(project, revision):
+    pk.register_property_schema("ahu", ["cong_suat_lanh_kw", "luu_luong_gio_m3h"])
+
+    with pytest.raises(ValueError):
+        pk.register_object(project["project_id"], revision["revision_id"], type="ahu",
+                            discipline="mechanical", properties={"cong_suat_lanh_kw": 10})
+
+    obj = pk.register_object(
+        project["project_id"], revision["revision_id"], type="ahu", discipline="mechanical",
+        properties={"cong_suat_lanh_kw": 10, "luu_luong_gio_m3h": 2000},
+    )
+    assert obj["properties"]["luu_luong_gio_m3h"] == 2000
+
+    # Type khác không bị ảnh hưởng bởi schema đăng ký cho "ahu".
+    pk.register_object(project["project_id"], revision["revision_id"], type="pump",
+                        discipline="mechanical", properties={})
+
+
+def test_dang_ky_lai_schema_thay_the_khong_cong_don(project, revision):
+    pk.register_property_schema("ahu", ["a"])
+    pk.register_property_schema("ahu", ["b"])  # thay thế, không cộng dồn với "a"
+
+    # Chỉ "b" còn bắt buộc — thiếu "a" không còn bị chặn.
+    obj = pk.register_object(project["project_id"], revision["revision_id"], type="ahu",
+                              discipline="mechanical", properties={"b": 1})
+    assert obj["properties"] == {"b": 1}
+
+
+# --- Quyết định #3 (mục 13 đặc tả): thành viên dự án ---
+
+def test_owner_tu_dong_la_admin_dau_tien(project):
+    members = pk.list_project_members(project["project_id"])
+    assert len(members) == 1
+    assert members[0]["username"] == "ky.su.a"
+    assert members[0]["role"] == "admin"
+    assert pk.get_member_role(project["project_id"], "ky.su.a") == "admin"
+
+
+def test_them_thanh_vien_va_doc_lai_vai_tro(project):
+    pk.add_project_member(project["project_id"], "ky.su.b", role="engineer")
+    assert pk.get_member_role(project["project_id"], "ky.su.b") == "engineer"
+    assert len(pk.list_project_members(project["project_id"])) == 2
+
+
+def test_them_lai_thanh_vien_da_co_thi_doi_vai_tro_khong_tao_hang_moi(project):
+    pk.add_project_member(project["project_id"], "ky.su.b", role="viewer")
+    pk.add_project_member(project["project_id"], "ky.su.b", role="admin")
+    members = [m for m in pk.list_project_members(project["project_id"]) if m["username"] == "ky.su.b"]
+    assert len(members) == 1
+    assert members[0]["role"] == "admin"
+
+
+def test_xoa_thanh_vien(project):
+    pk.add_project_member(project["project_id"], "ky.su.b")
+    pk.remove_project_member(project["project_id"], "ky.su.b")
+    assert pk.get_member_role(project["project_id"], "ky.su.b") is None
+
+
+def test_nguoi_khong_phai_thanh_vien_tra_ve_none(project):
+    assert pk.get_member_role(project["project_id"], "nguoi.la") is None
+
+
+def test_vai_tro_khong_hop_le_nem_loi(project):
+    with pytest.raises(ValueError):
+        pk.add_project_member(project["project_id"], "ky.su.b", role="superadmin")
+
+
+# --- Quyết định #4 (mục 13 đặc tả): tự động active theo ngưỡng confidence ---
+
+def test_try_auto_activate_duoi_nguong_khong_doi_gi(project, revision, monkeypatch):
+    from src.config import settings
+    monkeypatch.setattr(settings, "project_kernel_auto_activate_confidence", 0.8)
+
+    obj = pk.register_object(project["project_id"], revision["revision_id"], type="ahu",
+                              discipline="mechanical", confidence=0.5)
+    pk.update_object_status(obj["object_id"], "normalized")
+    pk.update_object_status(obj["object_id"], "validated")
+
+    assert pk.try_auto_activate(obj["object_id"]) is False
+    assert pk.get_object(obj["object_id"])["status"] == "validated"
+
+
+def test_try_auto_activate_dat_nguong_tu_chuyen_active(project, revision, monkeypatch):
+    from src.config import settings
+    monkeypatch.setattr(settings, "project_kernel_auto_activate_confidence", 0.8)
+
+    obj = pk.register_object(project["project_id"], revision["revision_id"], type="ahu",
+                              discipline="mechanical", confidence=0.95)
+    pk.update_object_status(obj["object_id"], "normalized")
+    pk.update_object_status(obj["object_id"], "validated")
+
+    assert pk.try_auto_activate(obj["object_id"]) is True
+    assert pk.get_object(obj["object_id"])["status"] == "active"
+
+
+def test_try_auto_activate_sai_trang_thai_khong_doi_gi(project, revision):
+    """Chỉ áp dụng khi đang `validated` — object còn `discovered` phải bị bỏ qua, không
+    bị "nhảy cóc" lên active dù confidence cao."""
+    obj = pk.register_object(project["project_id"], revision["revision_id"], type="ahu",
+                              discipline="mechanical", confidence=1.0)
+    assert pk.try_auto_activate(obj["object_id"]) is False
+    assert pk.get_object(obj["object_id"])["status"] == "discovered"
