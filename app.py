@@ -45,9 +45,9 @@ with st.sidebar:
             with st.spinner(f"Đang làm sạch và tối ưu CAD tự động (Purge, Overkill, Chuẩn hóa)..."):
                 from src.tools import standardize_cad_drawing, optimize_cad_drawing, extract_new_blocks_to_library
                 try:
-                    standardize_cad_drawing(file_path)
-                    optimize_cad_drawing(file_path)
-                    extract_res = extract_new_blocks_to_library(file_path)
+                    standardize_cad_drawing.invoke({"file_path": file_path})
+                    optimize_cad_drawing.invoke({"file_path": file_path})
+                    extract_res = extract_new_blocks_to_library.invoke({"file_path": file_path})
                     st.success(f"Đã làm sạch và tối ưu thành công bản vẽ: {safe_name}. {extract_res}")
                 except Exception as e:
                     st.warning(f"Đã lưu file {safe_name}, nhưng gặp lỗi khi tối ưu tự động: {e}")
