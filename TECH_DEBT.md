@@ -336,3 +336,27 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
   trình sạch** (`python -c "import src.X"`), nên vòng lặp quay lại là đỏ ngay — đã thử tái
   lập vòng cũ để xác nhận test bắt được. Ngoài ra E2E hạ tầng thật và 7 test giao diện đều
   chạy lại đạt, vì đổi thứ tự import là đúng loại thay đổi chỉ vỡ lúc chạy thật.
+
+## 13. OCR chưa chạy thử với engine thật 🟡 Đã viết, chưa chạy thử được
+
+- **Đã làm:** `src/ocr_tools.py` với ba tool (`ocr_image`, `ocr_pdf_pages`,
+  `ocr_title_block`), đã nạp vào `tools` và `TOOLS_BY_ROLE` nên agent gọi được thật —
+  không lặp lại lỗi của `detect_cad_symbols_yolo` (mục 5) là tồn tại nhưng không vai trò
+  nào cầm. Engine là điểm nối tường minh `register_ocr_engine`, cùng khuôn với
+  `standards_backend`.
+- **Chưa chạy thử được:** máy phát triển và CI **không có** `tesseract-ocr` lẫn
+  `poppler-utils` (gói hệ thống, không cài bằng `uv`). 20 test hiện có phủ: đường thiếu
+  engine (trả hướng dẫn cài, không ném), engine hỏng thì lùi sang engine kế, đánh dấu chữ
+  không chắc, ngưỡng cấu hình được, chặn path traversal, cắt vùng khung tên, trần DPI,
+  một trang hỏng không làm hỏng cả hồ sơ. Tất cả chạy trên **engine giả đăng ký qua đúng
+  điểm nối công khai**.
+- **Nghĩa là chưa biết:** độ chính xác thật của Tesseract trên chữ tiếng Việt trong bản vẽ
+  MEPF, `psm` nào hợp với khung tên, DPI nào là điểm cân bằng. Đây là những thứ chỉ đo
+  được bằng hồ sơ scan thật, không suy ra từ code.
+- **Cần làm khi có máy cài được engine:** `apt-get install tesseract-ocr tesseract-ocr-vie
+  poppler-utils && uv sync --extra ocr`, rồi chạy thử trên vài bản vẽ scan thật và hiệu
+  chỉnh `OCR_MIN_CONFIDENCE` (mặc định 60) theo kết quả đo.
+- **Ranh giới đã chốt sẵn, không phụ thuộc kết quả đo:** mọi đầu ra OCR mang cảnh báo cố
+  định là *số liệu cần người xác nhận*, và chữ dưới ngưỡng tin cậy bị dán `[?]` ngay cạnh
+  từ đó. OCR là một mô hình đoán, nên số nó đọc ra không đủ tư cách đi thẳng vào bảng khối
+  lượng — đúng nguyên tắc "LLM không sinh số kỹ thuật", áp cho cả máy đọc chữ.

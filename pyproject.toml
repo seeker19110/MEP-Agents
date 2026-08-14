@@ -46,6 +46,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# OCR cho hồ sơ scan. Cố ý KHÔNG nằm ở nhóm chính: cài đặt máy chủ tối thiểu vẫn phải chạy
+# được, và `src/ocr_tools.py` khi thiếu engine thì trả về hướng dẫn cài chứ không sập.
+# Cần thêm gói hệ thống: tesseract-ocr, tesseract-ocr-vie, poppler-utils.
+ocr = [
+    "pytesseract>=0.3.13",
+    "pdf2image>=1.17.0",
+]
 phase-c = [
     "boto3>=1.35.0",
     "PyJWT>=2.9.0",
