@@ -10,6 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --no-cache-dir uv
 
+# ultralytics (YOLO, dùng cho detect_cad_symbols_yolo) kéo theo torch, mà bản torch mặc
+# định trên PyPI tải kèm nguyên bộ CUDA toolkit GPU (~2-3GB gói nvidia-*) dù container này
+# chạy CPU thuần, không có GPU passthrough. UV_TORCH_BACKEND=cpu ép uv lấy bản torch
+# CPU-only từ index riêng của PyTorch, bỏ hẳn các gói nvidia-* không cần tới.
+ENV UV_TORCH_BACKEND=cpu
+
 WORKDIR /app
 
 # Cài dependency trước để tận dụng layer cache khi chỉ code thay đổi
