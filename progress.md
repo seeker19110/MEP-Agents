@@ -459,10 +459,21 @@ là các việc **ngắn hạn** xếp theo tỉ lệ lợi ích / công sức, 
    đạt luồng API/Worker, nhưng chưa test được thao tác kéo-thả qua UI thật (Đợt 8 ghi rõ
    "chưa test").
 4. ~~Bắt tay code Project Kernel bước 1~~ — ✅ **Xong 2026-08-14**:
-   `src/project_kernel.py` + `tests/test_project_kernel.py` (20 test), đứng độc lập, chưa
-   nối vào tool/agent nào. Xem [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md)
-   mục 11. **Bước 2** (đường ghi thật opt-in nối vào `auto_quantity_takeoff`) vẫn chờ 4 câu
-   hỏi ở mục 13 của đặc tả đó được duyệt — chưa có câu trả lời chính thức nào.
+   `src/project_kernel.py` + `tests/test_project_kernel.py` (47 test), đứng độc lập, chưa
+   nối vào tool/agent nào.
+5. ~~Trả lời 4 câu hỏi mục 13 của đặc tả Project Kernel~~ — ✅ **Xong 2026-08-14**: registry
+   schema `properties` theo type, bảng `project_members`, ngưỡng
+   `PROJECT_KERNEL_AUTO_ACTIVATE_CONFIDENCE` (mặc định 0.8), quyết định giữ tách biệt với
+   revision file CAD. Xem [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) mục 13.
+6. ~~Đánh giá SQLite có đủ cho Project Kernel không~~ — ✅ **Xong 2026-08-14**: KHÔNG đủ về
+   lâu dài (nhiều Celery worker ghi đồng thời là kịch bản thật ngay khi bước 2 nối vào
+   `auto_quantity_takeoff`), nên đã thêm backend Postgres — **chạy thử thật** trên Postgres
+   16 cục bộ (`tests/test_project_kernel_postgres.py`, 8 test), không phải chỉ viết cú
+   pháp. SQLite vẫn là mặc định khi không có `DATABASE_URL`, đúng khuôn
+   `checkpointer_factory.py`. Xem [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) mục 5.
+7. ⬜ **Bước 2 Project Kernel** — đường ghi thật opt-in, nối vào một tool hiện có (đề xuất
+   `auto_quantity_takeoff`, sau cờ tắt mặc định). Không còn câu hỏi thiết kế nào chặn —
+   việc còn lại thuần túy là viết code + review vì lần đầu chạm vào luồng người dùng thật.
 
 ---
 
@@ -575,11 +586,13 @@ Engineering OS chịu trách nhiệm:
 
 ## 7.1 Project Kernel
 
-> **Đặc tả chi tiết (schema, stable ID, module surface, kế hoạch triển khai theo giai
-> đoạn, câu hỏi mở cần duyệt):** [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md).
-> Bước 1 ("schema + module trơn") **đã code** — `src/project_kernel.py`, đứng độc lập,
-> chưa nối tool/agent nào. Bước 2 (đường ghi thật, opt-in) chờ 4 câu hỏi ở mục 13 của đặc
-> tả đó được duyệt trước khi chạm vào bất kỳ tool hiện có nào.
+> **Đặc tả chi tiết (schema, stable ID, module surface, backend SQLite/Postgres, 4 quyết
+> định nghiệp vụ):** [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md).
+> Bước 1 ("schema + module trơn") **đã code**, cả 4 câu hỏi ở mục 13 **đã quyết** —
+> `src/project_kernel.py`, đứng độc lập, chưa nối tool/agent nào. Hỗ trợ cả SQLite (mặc
+> định) và Postgres (khi có `DATABASE_URL` thật) — cả hai backend **đã chạy thử thật**, kể
+> cả trên một instance Postgres 16, không chỉ viết cú pháp. Bước 2 (đường ghi thật, opt-in,
+> nối vào một tool hiện có) là việc còn lại — không còn câu hỏi thiết kế nào chặn.
 
 Project Kernel là “kernel” của Engineering OS.
 
@@ -1887,7 +1900,7 @@ Hệ thống phải thực hiện được toàn bộ workflow trên bằng stat
 | Standards RAG | 🟡 PARTIAL | Có retrieval, chưa phải structured compliance engine |
 | Digital Twin | ⬜ TODO | Core next milestone |
 | Engineering Graph | ⬜ TODO | Core next milestone |
-| Project Kernel + Canonical object model | 🟡 BƯỚC 1 XONG | `src/project_kernel.py` đứng độc lập, chưa nối tool/agent nào — [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) mục 11. Bước 2 chờ duyệt mục 13 |
+| Project Kernel + Canonical object model | 🟡 BƯỚC 1 + 4 QUYẾT ĐỊNH XONG | `src/project_kernel.py` đứng độc lập, SQLite/Postgres (cả hai đã chạy thử thật) — [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) mục 5, 11, 13. Bước 2 (nối tool thật) là việc còn lại |
 | Evidence engine | ⬜ TODO | Core next milestone |
 | Revision semantic model | 🟡 PARTIAL | CAD revision có, project-wide semantic revision chưa có |
 | Job/event platform | 🟡 PARTIAL | Có graph execution, chưa có platform job/event model |

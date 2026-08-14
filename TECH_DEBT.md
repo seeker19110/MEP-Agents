@@ -70,6 +70,17 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
 - **Vì sao chưa trả được lượt này:** đây là việc migrate dữ liệu thật sang hạ tầng thật
   (Postgres/S3 cụ thể của ai đó) — viết code migration/schema mà không có instance thật để
   chạy thử và không ai duyệt thiết kế schema là đoán mò, rủi ro cao hơn để trống.
+- **Cập nhật 2026-08-14 — thu hẹp phạm vi cho riêng Project Kernel:** `src/project_kernel.py`
+  (registry project/revision/source/object mới, xem
+  [`docs/DAC_TA_PROJECT_KERNEL.md`](docs/DAC_TA_PROJECT_KERNEL.md)) nay hỗ trợ backend
+  Postgres thật, **đã chạy thử** trên một instance Postgres 16 cục bộ
+  (`tests/test_project_kernel_postgres.py`) — lý do "chưa có instance thật để chạy thử"
+  không còn đúng riêng cho module này. Vẫn CHƯA trả cho phần còn lại của mục này: BOQ
+  Excel trong `uploads/` vẫn ở disk cục bộ (không phải S3), FAISS vẫn là vector store
+  chính (chưa migrate sang pgvector dù `USE_PGVECTOR` đã có sẵn ở `config.py`), và CSDL
+  người dùng (`users.py`) vẫn chỉ SQLite. Không mở rộng quyết định Postgres của Project
+  Kernel sang các phần đó trong lượt này — mỗi phần cần đánh giá riêng, không suy diễn
+  "một chỗ dùng được thì chỗ khác cũng vậy".
 
 ## 2. Giới hạn Phần cứng & Tự chủ AI (Offline Mode) 🟢 Chưa làm
 
