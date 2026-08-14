@@ -2,7 +2,7 @@
 
 Tài liệu này ghi nhận các giới hạn kỹ thuật hiện tại của dự án MEP-Agents và định hướng nâng cấp trong các Phase tiếp theo để tiến tới chuẩn Enterprise SaaS.
 
-Trạng thái tổng thể và số liệu hiện hành nằm ở [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md).
+Trạng thái tổng thể và số liệu hiện hành nằm ở [`progress.md`](progress.md) mục 3.
 
 ## Tổng quan mức ưu tiên
 

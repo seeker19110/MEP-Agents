@@ -26,7 +26,7 @@ Reviewer kiểm duyệt đầu ra.
 - **Quản lý phụ thuộc:** `uv` (khoá trong `uv.lock`, nhóm phụ nằm ở `[project.optional-dependencies]`)
 - **Test:** `pytest` — hiện **600 test**, tất cả phải xanh. Có thêm E2E, xem [`docs/E2E.md`](docs/E2E.md)
 - **Kiến trúc:** [`docs/DAC_TA_HE_THONG.md`](docs/DAC_TA_HE_THONG.md) là đặc tả đầy đủ —
-  đọc trước khi sửa gì đáng kể. [`docs/TIEN_DO_DU_AN.md`](docs/TIEN_DO_DU_AN.md) cho trạng
+  đọc trước khi sửa gì đáng kể. [`progress.md`](progress.md) mục 3 cho trạng
   thái hiện tại, [`TECH_DEBT.md`](TECH_DEBT.md) cho cái gì còn nợ và **vì sao chưa trả**,
   [`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md) cho lỗ hổng đã biết
 

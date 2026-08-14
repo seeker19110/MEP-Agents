@@ -2,7 +2,8 @@
 
 > **Document status:** Master progress ledger + product north star + implementation specification
 >
-> **Updated:** 2026-08-14
+> **Updated:** 2026-08-14 (mục 3.2–3.8 gộp từ `docs/TIEN_DO_DU_AN.md`, nay đã xóa — file
+> này là nguồn duy nhất cho cả tầm nhìn chiến lược lẫn nhật ký tiến độ thực tế)
 >
 > **Repository:** `seeker19110/MEP-Agents`
 >
@@ -236,6 +237,233 @@ Vì vậy Phase B chưa đánh dấu hoàn thành toàn bộ.
 
 ---
 
+## 3.2 Số liệu hiện trạng
+
+**Cập nhật lần cuối của nhật ký này:** 2026-08-13 — sau đợt quét sâu viết lại đặc tả. Đặc
+tả đầy đủ nay nằm ở [`docs/DAC_TA_HE_THONG.md`](docs/DAC_TA_HE_THONG.md); lỗ hổng tìm được ở
+[`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md) (nặng nhất: xác thực JWT chưa từng có hiệu
+lực — API mở toang ở chế độ JWT, nay đã bịt). Sau đó đã trả **toàn bộ** nợ kỹ thuật sửa
+được bằng code: xóa hết module patch, thêm quyền sở hữu tài nguyên, hạn mức upload/tần
+suất, mật khẩu Redis, và đẩy tiến độ thật qua Redis Pub/Sub. Phần còn lại đều cần tài
+nguyên thật (Docker daemon, GPU, hạ tầng Postgres/S3, Revit/AutoCAD) — xem bảng cuối
+[`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md).
+
+**Đợt tiếp theo** bổ sung CSDL người dùng (3 vai trò, thu hồi token), workspace riêng từng
+người trong Worker, và rà soát sâu tầng CAD/QS — đợt rà soát này tìm ra **hai lỗi bóc khối
+lượng sai**, loại nguy hiểm nhất về nghiệp vụ: cảnh báo "tuyến vẽ 2 nét bị tính đôi" im
+lặng không nổ trên bản vẽ vẽ tay, và ngã ba ống bị đếm thành co thay vì tê.
+
+| Chỉ số | Giá trị | Ghi chú |
+|---|---:|---|
+| Mã nguồn Python (`src/`) | ~13.900 dòng | 62 module |
+| Test Python | **756 đạt / 0 lỗi** | 67 file trong `tests/` (đã xác minh lại 2026-08-14) |
+| Test giao diện | **7 đạt / 0 lỗi** | Playwright, Chromium thật (`web/tests-ui/`) |
+| Số PR đã hợp nhất | 32+ | tính tới `c44e3b3`, nhiều PR sau đó tiếp tục hợp nhất |
+| Phase đã hợp nhất | A, B, C, D | xem mục 3.3 |
+| Docker Compose | ✅ Chạy thật thành công | trên Windows (Docker Desktop + WSL2), 2026-08-14 — xem mục 3.6 Đợt 8 |
+
+Cách kiểm chứng lại số liệu:
+
+```bash
+uv run pytest -q
+uv run python -m py_compile app.py main.py src/*.py
+```
+
+## 3.3 Các Phase đã hợp nhất
+
+| Phase | Nội dung | Tài liệu | Trạng thái |
+|---|---|---|---|
+| **A** | 5 skill CAD/QS gộp pipeline (`batch_edit_pipes`, `batch_replace_text`, `update_title_block`, `prepare_drawing`, `full_boq`) | [`README_PHASE_A.md`](README_PHASE_A.md) | ✅ Có test, chạy được offline |
+| **B** | Checklist QS chấm điểm 0–100, `compare_boq`, chốt chặn Human-in-the-loop, hàng đợi đa ý định | [`README_PHASE_B.md`](README_PHASE_B.md) | ✅ Có test |
+| **C** | Postgres/pgvector, S3, JWT, scaffold YOLO MEPF | [`README_PHASE_C.md`](README_PHASE_C.md) | ⚠️ Code + test đủ, **chưa chạy với hạ tầng thật** |
+| **D** | Tìm kiếm lai (vector + từ khóa RRF), embedding cục bộ, LangGraph `Send` chạy song song M/E/P/F, cache tool theo vai trò | [`README_PHASE_D.md`](README_PHASE_D.md) | ✅ Có test |
+
+Bốn Phase **từng** nối vào hệ thống bằng patch lúc import (gán đè hàm/tool của module
+khác). Kiểu nối đó đã sinh ra lỗi thật (xem mục 3.5) và nay đã được thay hết bằng ba điểm
+nối tường minh: registry tool (`src/tools.py`), backend tra cứu
+(`src/standards_backend.py`), middleware điều phối (`src/supervisor_pipeline.py`).
+
+## 3.4 Đợt rà soát 2026-08-13 (PR #32)
+
+Chạy đủ bộ test trên `main` ra **13 test đỏ**. Không phải test hỏng vặt: 3 lỗi thật lọt
+vào khi patch Phase C/D ghi đè code cũ, cộng 1 nhóm test lạc hậu.
+
+| Lỗi | Mức độ | Hệ quả nếu không sửa |
+|---|---|---|
+| Đệ quy vô hạn khi đọc XREF (`src/cad_cache.py`) | 🔴 Nặng | **Mọi XREF thất bại im lặng** — nội dung xref bị loại khỏi khối lượng, chỉ để lại một dòng note khó hiểu. Đúng kịch bản "bóc thiếu mà không cảnh báo" mà `cad_loader.py` ghi rõ là phải tránh |
+| `detect_cad_symbols_yolo` mất `resolve_safe_path` (`src/vision_tools.py`) | 🟠 Cao | Tool đọc được file ngoài workspace của phiên; `predict` ném lỗi thì tool vỡ thay vì báo |
+| `ingest` ném `FileNotFoundError` lần chạy đầu (`src/ingest.py`) | 🟡 Vừa | Người dùng mới chạy `python -m src.ingest` là gặp traceback |
+| `JWT_BOOTSTRAP_USER` qua env bị nuốt (`src/auth_jwt.py`) | 🟡 Vừa | Đổi user bootstrap bằng biến môi trường im lặng vô tác dụng |
+| `uv.lock` lệch `pyproject.toml` từ Phase C | 🟡 Vừa | `uv sync --extra phase-c` không tái lập được đúng môi trường |
+
+**Thay đổi hành vi cần biết:** sau khi sửa lỗi XREF, khối lượng bóc từ bản vẽ **có xref sẽ
+tăng** so với trước. Đó là con số đúng — trước đây phần xref bị bỏ qua hoàn toàn.
+
+## 3.5 Bài học rút ra: rủi ro của kiểu "patch lúc import"
+
+Lỗi XREF nói trên là hệ quả trực tiếp của kiến trúc patch: `cad_loader_perf_patch` gán tạm
+`ezdxf.readfile = readfile_cached`, còn `readfile_cached` lại gọi ngược `ezdxf.readfile` ở
+nhánh cache-miss → tự gọi chính mình. Từng module đứng riêng đều đúng; chỉ sai khi ghép.
+
+Hệ quả cho cách làm việc về sau:
+
+1. **Luôn chạy đủ bộ test, không chỉ test của Phase mình làm.** Cả 13 lỗi đều lộ ra ở lần
+   chạy `pytest` toàn bộ; chạy riêng `tests/test_phase_d.py` thì xanh hết.
+2. Module bị patch nên giữ tham chiếu hàm gốc **ngay lúc import**, không gọi lại qua tên
+   module (tên đó có thể đã bị người khác thay).
+3. Khi một Phase đổi hành vi có chủ đích, sửa luôn test cũ trong cùng PR — đừng để test
+   đỏ tồn tại như "nhiễu nền", vì lỗi thật sẽ lẫn vào đó (đúng như đã xảy ra ở đây).
+
+## 3.6 Lịch sử các đợt xử lý tiếp theo
+
+### Đợt 2 (cùng ngày PR #32)
+
+Làm theo đúng 3 việc đề ở mục 3.8 mà môi trường hiện tại cho phép:
+
+- **Rà hết tầng patch còn lại** — không có ca đệ quy thứ hai. Nhưng lộ ra một lỗi khác
+  cùng gốc: `cad_loader_perf_patch` gán đè biến toàn cục `ezdxf.readfile` quanh mỗi lần
+  gộp xref. Phase D chạy song song bằng thread nên hai lời gọi chồng nhau khôi phục nhầm
+  của nhau → `ezdxf.readfile` kẹt vĩnh viễn ở bản cache, mọi chỗ đọc DXF sau đó dùng chung
+  một doc có thể bị sửa đổi. Đã sửa bằng cách truyền hàm đọc qua tham số.
+- **Gộp 8 skill Phase A/B vào registry chính** `src/tools.py`. Tầng patch giữ lại làm mạng
+  lưới an toàn. Bộ tool từng vai trò không đổi (đã đối chiếu số lượng trước/sau).
+- **Chạy thử Docker / E2E**: vẫn chưa làm được — môi trường này không có Docker daemon.
+
+### Đợt 3
+
+- **Thêm điểm mở rộng `src/standards_backend.py`** — Phase C/D thôi tráo đối tượng tool
+  `search_standards`, chuyển sang đăng ký backend theo mức ưu tiên. Tool giữ nguyên danh
+  tính suốt vòng đời tiến trình.
+- **Nguồn embedding vào thẳng `vectorstore.get_embeddings`** — sửa kèm một lỗi thật:
+  `python -m src.ingest` không import `graph` nên patch Phase D không chạy, cộng với việc
+  `ingest` chặn cứng ở `OPENAI_API_KEY` → **chạy offline không nạp được index**, hybrid
+  mất hẳn nhánh vector mà không có dấu hiệu gì.
+- **Xóa hàm chết** `get_tools_for_role_cached()`.
+- **Sửa hardcode địa chỉ LLM cục bộ** — `src/agents.py` hardcode `localhost:11434`
+  (Ollama) và `localhost:8000` (vLLM), trong khi phía embedding lại đọc `OLLAMA_BASE_URL`.
+  Hai nửa của cùng một cấu hình đi hai đường: embedding trỏ đúng máy, LLM gọi vào chính
+  container của nó. Chỉ lộ ra khi thật sự dựng cấu hình lai. Nay đọc env, dùng chung biến
+  với embedding, tự chuẩn hóa đuôi `/v1`.
+- **Ghi nợ, chưa làm:** phần patch bọc node của graph (HIL, hàng đợi, fan-out song song)
+  không dùng được kiểu registry này — cần tái cấu trúc `agents.py`/`graph.py` thành các
+  bước có điểm nối sẵn. Việc lớn, để riêng một PR. Xem `TECH_DEBT.md` mục 10.
+
+### Đợt 4 — Kịch bản E2E
+
+Thêm hai tầng kiểm thử E2E, xem [`docs/E2E.md`](docs/E2E.md):
+
+- **Tầng 1** `tests/test_e2e_takeoff.py` — chạy trong CI, đi trọn đường bản vẽ `.dxf` thật
+  → bóc khối lượng thật → Excel thật → tải về qua FastAPI, chỉ thay broker bằng gọi đồng
+  bộ. Đã kiểm chứng sức bắt lỗi: làm hỏng luồng gộp XREF thì 3/4 test chuyển đỏ.
+- **Tầng 2** `scripts/e2e_smoke.py` — không giả lập gì. **Đã chạy đạt** với Redis thật,
+  worker Celery ở tiến trình riêng, FastAPI thật: tải lên → worker nhặt task qua Redis →
+  Excel 5.582 byte → tải về, tổng chiều dài khớp hình học đã dựng. Đường xác thực
+  `MEP_AGENTS_API_KEY` cũng đã kiểm (thiếu khóa → 401, có khóa → đạt).
+
+Đây là lần đầu dự án có bằng chứng luồng phân tán chạy thật đầu-cuối. **Vẫn chưa** chạy
+qua `docker compose up --build` — môi trường viết code không có Docker daemon, và lớp
+container còn có thể sinh lỗi riêng (quyền volume, biến môi trường, healthcheck).
+
+### Đợt 5 — Gỡ nốt phần patch bọc node
+
+Đây là phần cuối của mục 10 `TECH_DEBT.md`, trước đó cố ý để lại vì nó nằm giữa luồng
+điều phối.
+
+- **`src/supervisor_pipeline.py`** — điểm nối kiểu middleware. Phase B (chốt chặn HIL +
+  hàng đợi) và Phase D (fan-out song song) đăng ký lớp theo mức ưu tiên thay vì gán đè
+  `agents.supervisor_node`. Hàm điều phối nay giữ nguyên danh tính suốt vòng đời tiến
+  trình, nên `src/graph.py` không còn phải đọc lại nó sau các dòng import patch.
+- **`DELIVERABLE_TOOLS`** khai báo thẳng trong `src/agents.py`.
+- **Kiểm chứng tương đương:** chạy cùng 10 tình huống định tuyến đại diện trên bản trước
+  và sau, kết quả **giống hệt từng trường**. E2E hạ tầng thật chạy lại cũng đạt.
+
+Sau đợt này **không còn chỗ nào gán đè hàm hay tráo đối tượng của module khác.** Hai
+patch còn lại (`agents_perf_patch`, `qs_perf_patch`) là bọc thuần túy quanh một hàm, không
+dính lớp lỗi đã gặp — để lại có chủ đích.
+
+### Đợt 6 — Triển khai theo khuyến nghị
+
+- **Test giao diện `web/`** — 7 kịch bản Playwright trên Chromium thật, gồm **trọn đường
+  qua trình duyệt**: thả bản vẽ → bấm phân tích → WebSocket đẩy trạng thái → tải Excel về.
+  Đây là mảng trước đó không có lớp kiểm thử nào. Test bắt ngay một lỗi giao diện thật:
+  vùng kéo-thả mời "hoặc click để chọn file" nhưng **không có `<input type="file">`** — cú
+  bấm rơi vào hư không. Đã sửa, và lời mời nay là nút thật (bàn phím dùng được).
+- **Cảnh báo bảng đơn giá cũ** — rủi ro nghiệp vụ lớn nhất còn lại: con số tiền đi vào hồ
+  sơ thầu dựa trên `data/unit_prices.csv` mà không ai biết bảng giá cũ chưa. Nay có
+  `data/unit_prices.meta.json` khai báo ngày hiệu lực, quá ngưỡng thì chính báo cáo dự
+  toán mang theo cảnh báo. Xem `TECH_DEBT.md` mục 11.
+- **Chưa làm được:** chạy Docker Compose (không có Docker daemon) và dựng Ollama thật
+  (chưa cài). Hai việc này vẫn cần máy khác.
+
+### Đợt 7 — Tái cấu trúc module: cắt vòng import
+
+`tools.py` và `qs_tools.py` import ngược nhau ở mức module, khiến `import src.qs_tools`
+trực tiếp bị vỡ và buộc cả hai file phải dồn import xuống giữa/cuối file kèm `# noqa: E402`.
+
+- Tách hàm dùng chung sang **`src/mepf_spec.py`** — module nền, không import module nào
+  của dự án. Vòng lặp đứt hẳn.
+- Toàn bộ import của hai file về đầu file; **không còn `# noqa: E402`** nào.
+- `src/api.py` nạp thẳng từ `src.qs_tools` thay vì đi vòng qua `src.tools`.
+- Mã nguồn **giảm ròng ~14 dòng** trong ba file, dù thêm một module mới.
+- `tests/test_no_import_cycles.py` nạp từng module lõi trong **tiến trình sạch** để vòng
+  lặp quay lại là đỏ ngay; đã thử tái lập vòng cũ để xác nhận test bắt được.
+
+### Đợt 8 — Docker Compose chạy thật lần đầu (2026-08-14)
+
+Máy viết code trước đây không có Docker daemon nên mục này chỉ dừng ở "viết xong, kiểm cú
+pháp". Nay chạy thật `docker compose up --build` trên máy Windows có Docker Desktop + WSL2,
+lộ ra đúng 2 lỗi runtime như dự đoán trong `TECH_DEBT.md`:
+
+- **Build timeout do tải thừa CUDA toolkit** — `ultralytics` (YOLO) kéo `torch` bản GPU
+  mặc định, tải kèm ~2-3GB gói `nvidia-*` dù container chạy CPU thuần. Sửa bằng
+  `ENV UV_TORCH_BACKEND=cpu` trong `Dockerfile`.
+- **Tải BOQ luôn báo "File not found"** — `data/workspaces/<user_id>/boq/...` (nơi Worker
+  ghi Excel) không nằm trong volume nào của Compose, mỗi container có bản riêng không chia
+  sẻ. Thêm volume `workspaces_data:/app/data/workspaces` dùng chung `api`/`worker`.
+
+Đã kiểm chứng trọn luồng: cả 5 container `healthy`, upload DXF → Worker Celery qua Redis →
+bóc khối lượng đúng → Excel → tải về HTTP 200, mở đọc được. LLM cục bộ qua Ollama
+(`host.docker.internal` — DNS đặc biệt của Docker Desktop cho Windows để container gọi ra
+máy host). Xem chi tiết mục 3, 16 trong [`TECH_DEBT.md`](TECH_DEBT.md).
+
+**Chưa test:** kéo-thả file qua Web App trong trình duyệt thật (công cụ trình duyệt của
+phiên làm việc không hỗ trợ dialog chọn file OS), Postgres/pgvector dùng thật (`USE_PGVECTOR`
+vẫn mặc định `false`), plugin Revit/AutoCAD.
+
+## 3.7 Việc còn nợ
+
+Chi tiết đầy đủ ở [`TECH_DEBT.md`](TECH_DEBT.md). Tóm tắt mức ưu tiên:
+
+| Việc | Mức | Vướng ở đâu |
+|---|---|---|
+| Migrate Postgres/pgvector/S3 với hạ tầng thật | 🟠 Cao | Cần instance thật + người duyệt schema |
+| Kiểm thử plugin trong Revit/AutoCAD thật | 🟡 Vừa | Cần máy Windows có 2 phần mềm đó |
+| Fine-tune YOLO trên ký hiệu MEPF | 🟡 Vừa | Cần bộ ảnh gán nhãn thật |
+| Real-time đúng nghĩa (Redis Pub/Sub) | 🟡 Vừa | Server vẫn polling Celery backend 1s |
+| Local LLM / air-gapped | 🟢 Thấp | Cần GPU 16–24GB VRAM |
+| Billing + xác thực đa người dùng | 🟢 Thấp | Cần tài khoản cổng thanh toán thật |
+
+Điểm chung của nhóm còn nợ: **không phải việc sửa code**, mà là việc cần hạ tầng, phần
+cứng, dữ liệu thật hoặc quyết định kinh doanh. Viết code đoán trước cho chúng rủi ro cao
+hơn lợi ích.
+
+## 3.8 Đề xuất việc tiếp theo (thực dụng, ngắn hạn)
+
+Khác với lộ trình chiến lược "Engineering OS" ở mục 5 trở đi (dài hạn, kiến trúc lớn), đây
+là các việc **ngắn hạn** xếp theo tỉ lệ lợi ích / công sức, cao xuống thấp:
+
+1. ~~Chạy thử Docker Compose thật~~ — ✅ **Xong 2026-08-14**, xem Đợt 8 ở mục 3.6.
+2. **Đối chiếu `data/unit_prices.csv` với công bố giá thật của Sở Xây dựng**, và phân theo
+   vùng. Cơ chế cảnh báo đã có, nhưng số liệu vẫn là giá tham khảo nội bộ.
+3. **Kiểm thử kéo-thả file qua Web App trong trình duyệt thật** — Docker Compose đã chạy
+   đạt luồng API/Worker, nhưng chưa test được thao tác kéo-thả qua UI thật (Đợt 8 ghi rõ
+   "chưa test").
+4. **Bắt tay code Project Kernel** theo đặc tả
+   [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) — bước 1 ("schema +
+   module trơn") sau khi 4 câu hỏi ở mục 13 của đặc tả đó được duyệt.
+
+---
+
 # 4. Definition of Done của Phase B
 
 Phase B chỉ được đánh dấu `[x]` khi toàn bộ các điều kiện sau đạt:
@@ -344,6 +572,12 @@ Engineering OS chịu trách nhiệm:
 # 7. Engineering OS Core Components
 
 ## 7.1 Project Kernel
+
+> **Đặc tả chi tiết (schema, stable ID, module surface, kế hoạch triển khai theo giai
+> đoạn, câu hỏi mở cần duyệt):** [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md).
+> Đây là bước 2 trong "Immediate implementation order" (mục 44) — đã có đặc tả, **chưa có
+> code**. Mục 13 của đặc tả đó liệt kê các câu hỏi cần người phụ trách duyệt trước khi bắt
+> đầu code.
 
 Project Kernel là “kernel” của Engineering OS.
 
@@ -510,6 +744,9 @@ Estimate
 ---
 
 # 10. Canonical Engineering Object Model
+
+> Đặc tả cụ thể hóa thành schema SQLite (bảng `engineering_objects`, phân biệt `object_id`
+> bất biến với `tag` nghiệp vụ) nằm ở [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) mục 6.4 và 7.
 
 Mọi discipline dùng chung object contract.
 
@@ -1648,7 +1885,7 @@ Hệ thống phải thực hiện được toàn bộ workflow trên bằng stat
 | Standards RAG | 🟡 PARTIAL | Có retrieval, chưa phải structured compliance engine |
 | Digital Twin | ⬜ TODO | Core next milestone |
 | Engineering Graph | ⬜ TODO | Core next milestone |
-| Canonical object model | ⬜ TODO | Core next milestone |
+| Project Kernel + Canonical object model | 🟡 ĐẶC TẢ XONG | [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) — schema + module surface đã chốt, chưa code, chờ duyệt mục 13 |
 | Evidence engine | ⬜ TODO | Core next milestone |
 | Revision semantic model | 🟡 PARTIAL | CAD revision có, project-wide semantic revision chưa có |
 | Job/event platform | 🟡 PARTIAL | Có graph execution, chưa có platform job/event model |
