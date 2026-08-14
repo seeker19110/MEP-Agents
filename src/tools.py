@@ -15,6 +15,9 @@ import ast
 import operator as op
 import logging
 import threading
+import functools
+from contextlib import contextmanager
+import psutil
 from functools import lru_cache
 from src.workspace import resolve_safe_path, get_project_root
 from src.cad_revision import create_snapshot
@@ -68,6 +71,40 @@ from src import cad_geometry
 from src import cad_loader
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _max_cpu_priority():
+    """Nâng độ ưu tiên CPU của process hiện tại lên cao nhất trong lúc chạy một tool
+    CPU-bound đơn luồng (đọc/sửa toàn bộ entity của 1 file DXF không song song hoá được
+    an toàn), rồi trả về mức mặc định khi xong — để không giành CPU vĩnh viễn của phần
+    còn lại của server (ví dụ Streamlit đang phục vụ request khác) sau khi tool chạy xong.
+    Không có quyền (không phải admin/không phải root) thì bỏ qua, không báo lỗi.
+    """
+    proc = psutil.Process(os.getpid())
+    try:
+        original = proc.nice()
+        high = psutil.HIGH_PRIORITY_CLASS if sys.platform == "win32" else -10
+        proc.nice(high)
+    except Exception:
+        original = None
+    try:
+        yield
+    finally:
+        if original is not None:
+            try:
+                proc.nice(original)
+            except Exception:
+                pass
+
+
+def _boost_priority(func):
+    """Decorator: chạy `func` với CPU priority cao nhất (xem `_max_cpu_priority`)."""
+    @functools.wraps(func)
+    def _wrapper(*args, **kwargs):
+        with _max_cpu_priority():
+            return func(*args, **kwargs)
+    return _wrapper
 
 # Chuẩn hóa ký hiệu thông số MEPF nay nằm ở `src/mepf_spec.py` — module nền không import
 # ngược lại module nào của dự án. Trước đây hàm này định nghĩa ngay tại đây và `qs_tools`
@@ -1189,6 +1226,7 @@ def audit_cad_drawing_errors(file_path: str, text_duplicate_tolerance: float = 1
 
 
 @tool
+@_boost_priority
 def optimize_cad_drawing(file_path: str, output_path: str = "", dedupe_tolerance: float = 1.0) -> str:
     """Tối ưu & dọn dẹp bản vẽ CAD (.dxf) TỰ ĐỘNG, thuần hình học (KHÔNG dùng LLM) — phù
     hợp chạy offline hoặc với model AI yếu vì không cần suy luận, chỉ cần gọi 1 tool:
@@ -1390,6 +1428,7 @@ def _ensure_block_attributes(block, std: dict) -> bool:
 
 
 @tool
+@_boost_priority
 def standardize_cad_drawing(file_path: str, output_path: str = "") -> str:
     """Chuẩn hóa TÊN LAYER, TÊN BLOCK và MÔ TẢ/MÃ HIỆU của bản vẽ CAD (.dxf) người
     dùng đẩy vào theo tiêu chuẩn nội bộ MEPF (xem `src/cad_standards.py`). CHỈ sửa
@@ -1585,6 +1624,7 @@ def add_color_legend(file_path: str, output_path: str = "") -> str:
         return f"Lỗi thêm chú thích màu sắc: {e}"
 
 @tool
+@_boost_priority
 def extract_new_blocks_to_library(file_path: str) -> str:
     """Quét bản vẽ CAD mới, lọc và trích xuất các Block hợp lệ (chưa có) vào thư viện mepf_library.dxf."""
     logger.info("Extracting new blocks from %s to library", file_path)
