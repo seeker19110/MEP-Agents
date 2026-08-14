@@ -10,7 +10,7 @@ Trạng thái tổng thể và số liệu hiện hành nằm ở [`progress.md`
 |---|-----|--------|------------|
 | 7 | Bảo mật API (path traversal + không xác thực) | 🔴 Khẩn cấp | ✅ Đã trả (path traversal + API key + CORS) |
 | 1 | Database & lưu trữ (Postgres/pgvector/S3) | 🟠 Cao | Chưa làm — cần hạ tầng thật, xem lý do bên dưới |
-| 3 | Hạ tầng triển khai (Docker) | 🟠 Cao | ✅ Đã viết đủ 4 service — **chưa chạy thử được** (không có Docker daemon ở môi trường viết code) |
+| 3 | Hạ tầng triển khai (Docker) | 🟠 Cao | ✅ Đã trả — **chạy thật thành công trên Windows** 2026-08-14, sửa 2 lỗi runtime lộ ra khi chạy thật |
 | 4 | Real-time (WebSocket) | 🟡 Trung bình | ✅ Phía server đã trả (Redis Pub/Sub); plugin Revit/AutoCAD vẫn chưa |
 | 8 | Plugin/Web hardcode địa chỉ server | 🟡 Trung bình | ✅ Đã trả (Revit/AutoCAD/Web đều hết hardcode) |
 | 5 | Computer Vision (YOLO cho bản vẽ rác) | 🟡 Trung bình | Đã làm 1 phần — cần dữ liệu gán nhãn thật |
@@ -24,7 +24,7 @@ Trạng thái tổng thể và số liệu hiện hành nằm ở [`progress.md`
 | 13 | Xác thực JWT chưa từng có hiệu lực (API mở toang ở chế độ JWT) | 🔴 Khẩn cấp | ✅ Đã trả — xem [`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md) mục 1 |
 | 14 | Chưa có quyền sở hữu tài nguyên (ai cũng tải được BOQ của người khác) | 🟠 Cao | ✅ Đã trả — `src/task_owner.py` |
 | 15 | Không giới hạn tần suất / dung lượng upload | 🟡 Trung bình | ✅ Đã trả — `src/rate_limit.py`, ghi upload theo khối |
-| 16 | Redis trong Compose không mật khẩu | 🟡 Trung bình | ✅ Đã viết — **chưa chạy thử được** (không có Docker daemon) |
+| 16 | Redis trong Compose không mật khẩu | 🟡 Trung bình | ✅ Đã trả — kiểm chứng thật khi chạy Compose 2026-08-14, `:?` chặn thiếu `REDIS_PASSWORD` đúng như thiết kế |
 
 **Không trả được** (mục 1, 2, phần còn lại của mục 6, và phần "chạy thử thật" của mục
 3/9/16): đều cần tài nguyên không có sẵn trong môi trường viết code hiện tại — dịch vụ Postgres/S3 thật
@@ -78,7 +78,7 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
 - **Hướng giải quyết:** Bổ sung cấu hình Server vật lý với GPU **16GB - 24GB VRAM** (RTX 4080/4090) cho các gói cài đặt nội bộ (On-premise).
 - **Vì sao chưa trả được:** cần mua/thuê phần cứng GPU thật — không phải việc sửa code.
 
-## 3. Hạ tầng Triển khai (Deployment) 🟠 Đã viết, chưa chạy thử được
+## 3. Hạ tầng Triển khai (Deployment) ✅ Đã chạy thử thật (2026-08-14)
 
 - **Đã làm:** thêm `docker-compose.yml` đóng gói đủ 5 service: `redis`, `api` (FastAPI,
   `uvicorn src.api:app`), `worker` (Celery), `streamlit` (`app.py`, UI gốc), `web` (React
@@ -89,19 +89,33 @@ Phát hiện khi rà soát (chưa từng ghi nhận trước bản cập nhật 
   Nay đọc qua biến môi trường `CELERY_BROKER_URL`/`REDIS_HOST`, Compose đặt sẵn, không đặt
   thì vẫn rơi về `localhost` như cũ cho dev cục bộ (không đổi hành vi khi chạy trực tiếp
   bằng `uv run`).
-- **CHƯA làm — quan trọng, không tự nhận là xong:** `docker-compose.yml` mới được viết và
-  kiểm tra CÚ PHÁP bằng `docker compose config` (parse thành công, resolve đủ 5 service),
-  nhưng **CHƯA từng chạy thật bằng `docker compose up --build`** — môi trường viết code
-  này không có Docker daemon (`docker info` báo không kết nối được `docker.sock`). Trước
-  khi coi mục này là hoàn thành, cần người có Docker daemon thật:
-  1. `cp .env.example .env` (điền API key LLM thật) và `cp web/.env.example web/.env`.
-  2. `docker compose up --build`.
-  3. Xác nhận cả 5 container lên khỏe (`docker compose ps`), Web App (`:5173`) gọi được
-     `/api/v1/takeoff` (`:8083`), Worker thực sự nhận và xử lý task (xem log `docker
-     compose logs worker`), tải BOQ Excel về thành công.
-  Rất có khả năng phát sinh lỗi runtime chưa lường trước (permission thư mục volume,
-  thiếu biến môi trường bắt buộc, healthcheck sai lệnh...) chỉ lộ ra khi chạy container
-  thật.
+- **✅ Đã chạy thật `docker compose up --build` trên Windows** (Docker Desktop + WSL2) —
+  đúng như dự đoán, lộ ra 2 lỗi runtime chỉ thấy khi chạy container thật:
+  1. 🟠 **Build timeout do tải thừa CUDA toolkit:** `ultralytics` (YOLO) kéo `torch` bản
+     GPU mặc định từ PyPI, tải kèm ~2-3GB gói `nvidia-*` (`cublas`, `nccl`, `cusparselt`,
+     `cufft`, `cudnn`...) dù container `api`/`worker`/`streamlit` chạy CPU thuần, không có
+     GPU passthrough trong Compose. Timeout lặp lại ở các gói khác nhau mỗi lần build lại.
+     Sửa bằng `ENV UV_TORCH_BACKEND=cpu` trong `Dockerfile` — ép `uv` lấy bản torch
+     CPU-only từ index của PyTorch, không đụng `pyproject.toml`/`uv.lock`.
+  2. 🔴 **Tải BOQ luôn báo "File not found":** `data/workspaces/<user_id>/boq/...` (nơi
+     Worker ghi Excel, từ tính năng workspace riêng người dùng ở PR #41) không nằm trong
+     volume nào của Compose — chỉ `uploads_data` (`/app/uploads`) và `boq_data`
+     (`/app/data/boq`) được mount, còn `/app/data/workspaces` là filesystem riêng của từng
+     container. Worker ghi file vào bản riêng của nó, container `api` không thấy được nên
+     `os.path.exists(excel_path)` luôn `False`. Sửa bằng cách thêm volume
+     `workspaces_data:/app/data/workspaces` dùng chung cho `api` và `worker`.
+- **Đã kiểm chứng trọn luồng thật:** cả 5 container lên `healthy`, upload DXF qua
+  `/api/v1/takeoff` → Worker Celery nhặt task qua Redis → bóc khối lượng đúng (8.4m ống =
+  8m hình học + 5% hao hụt) → ghi Excel → tải về qua `/api/v1/download/{task_id}` (HTTP
+  200, file mở đọc được bằng `openpyxl`). LLM cục bộ qua Ollama (`llama3.1:8b`,
+  `OLLAMA_BASE_URL=http://host.docker.internal:11434` — container gọi ra máy host qua tên
+  DNS đặc biệt của Docker Desktop cho Windows, không dùng `localhost`).
+- **Còn lại:** Web App qua trình duyệt thật chưa test hết (chỉ xác nhận trang tải, giao
+  diện kéo-thả hiển thị đúng — công cụ trình duyệt trong phiên làm việc không hỗ trợ chọn
+  file qua dialog OS thật để test kéo-thả trọn vẹn). `USE_PGVECTOR` vẫn mặc định `false`,
+  Postgres lên khỏe nhưng chưa thật sự dùng làm CSDL vector. Redis trong Compose nay đã có
+  mật khẩu bắt buộc (mục 16) nhưng giá trị đặt lúc test chỉ là ngẫu nhiên tạm thời — đổi
+  trước khi triển khai thật.
 
 ## 4. Giao tiếp Thời gian thực (Real-time Communication) 🟡
 

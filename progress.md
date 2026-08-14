@@ -260,6 +260,7 @@ lặng không nổ trên bản vẽ vẽ tay, và ngã ba ống bị đếm thà
 | Test giao diện | **7 đạt / 0 lỗi** | Playwright, Chromium thật (`web/tests-ui/`) |
 | Số PR đã hợp nhất | 32+ | tính tới `c44e3b3`, nhiều PR sau đó tiếp tục hợp nhất |
 | Phase đã hợp nhất | A, B, C, D | xem mục 3.3 |
+| Docker Compose | ✅ Chạy thật thành công | trên Windows (Docker Desktop + WSL2), 2026-08-14 — xem mục 3.6 Đợt 8 |
 
 Cách kiểm chứng lại số liệu:
 
@@ -407,13 +408,34 @@ trực tiếp bị vỡ và buộc cả hai file phải dồn import xuống gi�
 - `tests/test_no_import_cycles.py` nạp từng module lõi trong **tiến trình sạch** để vòng
   lặp quay lại là đỏ ngay; đã thử tái lập vòng cũ để xác nhận test bắt được.
 
+### Đợt 8 — Docker Compose chạy thật lần đầu (2026-08-14)
+
+Máy viết code trước đây không có Docker daemon nên mục này chỉ dừng ở "viết xong, kiểm cú
+pháp". Nay chạy thật `docker compose up --build` trên máy Windows có Docker Desktop + WSL2,
+lộ ra đúng 2 lỗi runtime như dự đoán trong `TECH_DEBT.md`:
+
+- **Build timeout do tải thừa CUDA toolkit** — `ultralytics` (YOLO) kéo `torch` bản GPU
+  mặc định, tải kèm ~2-3GB gói `nvidia-*` dù container chạy CPU thuần. Sửa bằng
+  `ENV UV_TORCH_BACKEND=cpu` trong `Dockerfile`.
+- **Tải BOQ luôn báo "File not found"** — `data/workspaces/<user_id>/boq/...` (nơi Worker
+  ghi Excel) không nằm trong volume nào của Compose, mỗi container có bản riêng không chia
+  sẻ. Thêm volume `workspaces_data:/app/data/workspaces` dùng chung `api`/`worker`.
+
+Đã kiểm chứng trọn luồng: cả 5 container `healthy`, upload DXF → Worker Celery qua Redis →
+bóc khối lượng đúng → Excel → tải về HTTP 200, mở đọc được. LLM cục bộ qua Ollama
+(`host.docker.internal` — DNS đặc biệt của Docker Desktop cho Windows để container gọi ra
+máy host). Xem chi tiết mục 3, 16 trong [`TECH_DEBT.md`](TECH_DEBT.md).
+
+**Chưa test:** kéo-thả file qua Web App trong trình duyệt thật (công cụ trình duyệt của
+phiên làm việc không hỗ trợ dialog chọn file OS), Postgres/pgvector dùng thật (`USE_PGVECTOR`
+vẫn mặc định `false`), plugin Revit/AutoCAD.
+
 ## 3.7 Việc còn nợ
 
 Chi tiết đầy đủ ở [`TECH_DEBT.md`](TECH_DEBT.md). Tóm tắt mức ưu tiên:
 
 | Việc | Mức | Vướng ở đâu |
 |---|---|---|
-| Chạy thử `docker compose up --build` thật | 🟠 Cao | Cần máy có Docker daemon |
 | Migrate Postgres/pgvector/S3 với hạ tầng thật | 🟠 Cao | Cần instance thật + người duyệt schema |
 | Kiểm thử plugin trong Revit/AutoCAD thật | 🟡 Vừa | Cần máy Windows có 2 phần mềm đó |
 | Fine-tune YOLO trên ký hiệu MEPF | 🟡 Vừa | Cần bộ ảnh gán nhãn thật |
@@ -430,13 +452,15 @@ hơn lợi ích.
 Khác với lộ trình chiến lược "Engineering OS" ở mục 5 trở đi (dài hạn, kiến trúc lớn), đây
 là các việc **ngắn hạn** xếp theo tỉ lệ lợi ích / công sức, cao xuống thấp:
 
-1. **Chạy thử Docker Compose thật** — việc còn lại rẻ nhất. Kịch bản E2E đã sẵn sàng:
-   `docker compose up --build -d` rồi `uv run python scripts/e2e_smoke.py` là biết ngay
-   lớp container có vấn đề gì.
-2. **Dựng thử cấu hình lai với Ollama thật** — phần sửa địa chỉ server mới chỉ được kiểm ở
-   mức "dựng đúng địa chỉ", chưa hề gọi tới server thật.
-3. **Đối chiếu `data/unit_prices.csv` với công bố giá thật của Sở Xây dựng**, và phân theo
+1. ~~Chạy thử Docker Compose thật~~ — ✅ **Xong 2026-08-14**, xem Đợt 8 ở mục 3.6.
+2. **Đối chiếu `data/unit_prices.csv` với công bố giá thật của Sở Xây dựng**, và phân theo
    vùng. Cơ chế cảnh báo đã có, nhưng số liệu vẫn là giá tham khảo nội bộ.
+3. **Kiểm thử kéo-thả file qua Web App trong trình duyệt thật** — Docker Compose đã chạy
+   đạt luồng API/Worker, nhưng chưa test được thao tác kéo-thả qua UI thật (Đợt 8 ghi rõ
+   "chưa test").
+4. **Bắt tay code Project Kernel** theo đặc tả
+   [`docs/DAC_TA_PROJECT_KERNEL.md`](../docs/DAC_TA_PROJECT_KERNEL.md) — bước 1 ("schema +
+   module trơn") sau khi 4 câu hỏi ở mục 13 của đặc tả đó được duyệt.
 
 ---
 
