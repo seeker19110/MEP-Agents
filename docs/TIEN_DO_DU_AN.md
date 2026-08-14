@@ -13,12 +13,17 @@ suất, mật khẩu Redis, và đẩy tiến độ thật qua Redis Pub/Sub. Ph
 nguyên thật (Docker daemon, GPU, hạ tầng Postgres/S3, Revit/AutoCAD) — xem bảng cuối
 [`RA_SOAT_LO_HONG.md`](RA_SOAT_LO_HONG.md).
 
+**Đợt tiếp theo** bổ sung CSDL người dùng (3 vai trò, thu hồi token), workspace riêng từng
+người trong Worker, và rà soát sâu tầng CAD/QS — đợt rà soát này tìm ra **hai lỗi bóc khối
+lượng sai**, loại nguy hiểm nhất về nghiệp vụ: cảnh báo "tuyến vẽ 2 nét bị tính đôi" im
+lặng không nổ trên bản vẽ vẽ tay, và ngã ba ống bị đếm thành co thay vì tê.
+
 ## 1. Số liệu hiện trạng
 
 | Chỉ số | Giá trị | Ghi chú |
 |---|---:|---|
-| Mã nguồn Python (`src/`) | ~13.470 dòng | 61 module (xóa 4 module patch, thêm 6 module chức năng) |
-| Test Python | **654 đạt / 0 lỗi** | 62 file trong `tests/` |
+| Mã nguồn Python (`src/`) | ~13.900 dòng | 62 module |
+| Test Python | **718 đạt / 0 lỗi** | 65 file trong `tests/` |
 | Test giao diện | **7 đạt / 0 lỗi** | Playwright, Chromium thật (`web/tests-ui/`) |
 | Số PR đã hợp nhất | 32 | tính tới `c44e3b3` |
 | Phase đã hợp nhất | A, B, C, D | xem mục 2 |

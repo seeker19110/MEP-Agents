@@ -19,8 +19,42 @@ hệ quả sai số trong hồ sơ thật:
 
 Toàn bộ hàm ở đây là hình học thuần, không phụ thuộc LLM.
 """
+import logging
 import math
+import os
 import re
+
+
+def _tuned(setting_name: str, env_name: str, default: float) -> float:
+    """Ngưỡng hình học đọc từ cấu hình, rơi về mặc định khi không đặt.
+
+    Bốn ngưỡng dưới đây **quyết định con số đi vào hồ sơ thầu**: chúng định đoạt một cảnh
+    báo có nổ hay không và một chỗ gãy là co hay không. Giá trị mặc định phủ được quy ước
+    vẽ phổ biến ở Việt Nam, nhưng mỗi văn phòng vẽ một kiểu — chỉnh được bằng cấu hình là
+    điều kiện để kỹ sư đối chiếu với hồ sơ đã duyệt của chính mình mà không phải sửa code.
+
+    Xem `scripts/kiem_chung_hinh_hoc.py` để dò ngưỡng phù hợp trên bộ bản vẽ thật.
+
+    **Thứ tự ưu tiên: biến môi trường → `settings` → mặc định.** Đọc `settings` trước là
+    sai, và sai một cách im lặng: `settings` luôn có sẵn giá trị mặc định khác 0, nên
+    nhánh đó luôn thắng và biến môi trường **không bao giờ được đọc tới**. Đặt
+    `ELBOW_MIN_ANGLE_DEG=30` rồi chạy sẽ thấy hệ thống vẫn dùng 15 mà không báo gì.
+    """
+    raw = os.environ.get(env_name, "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            logging.getLogger(__name__).warning(
+                "Ngưỡng %s='%s' không phải số — dùng mặc định %s.", env_name, raw, default)
+    try:
+        from src.config import settings
+        value = getattr(settings, setting_name, None)
+        if value:
+            return float(value)
+    except Exception:
+        pass
+    return default
 
 # Sai số tọa độ coi như trùng điểm (đơn vị bản vẽ). Bản vẽ MEPF thường vẽ theo mm nên
 # 1 đơn vị là đủ chặt để nối tuyến mà vẫn bỏ qua lệch do làm tròn khi vẽ.
@@ -33,11 +67,14 @@ _DUCT_RE = re.compile(r"(?i)\b(?:W)?(\d+(?:\.\d+)?)\s*[xX\*]\s*(?:H)?(\d+(?:\.\d
 
 # Góc đổi hướng tối thiểu để coi là một co (elbow). Dưới ngưỡng này chỉ là tuyến gần
 # thẳng bị chia nhỏ vertex, không phải chỗ lắp phụ kiện.
-ELBOW_MIN_ANGLE_DEG = 15.0
+# Chỉnh bằng `ELBOW_MIN_ANGLE_DEG` (biến môi trường) hoặc `elbow_min_angle_deg` (.env).
+ELBOW_MIN_ANGLE_DEG = _tuned("elbow_min_angle_deg", "ELBOW_MIN_ANGLE_DEG", 15.0)
 
 # Chiều dài một cây ống thương phẩm (đơn vị bản vẽ giống bản vẽ). Dùng để suy số măng
 # sông (nối ống): cứ hết một cây là phải có một mối nối.
-DEFAULT_PIPE_STOCK_LENGTH = 6000.0  # 6 m theo mm
+# Chỉnh bằng `PIPE_STOCK_LENGTH_MM` / `pipe_stock_length_mm` — ống nhựa và ống thép bán
+# theo cây dài khác nhau, mà số măng sông tỉ lệ thẳng với con số này.
+DEFAULT_PIPE_STOCK_LENGTH = _tuned("pipe_stock_length_mm", "PIPE_STOCK_LENGTH_MM", 6000.0)
 
 
 def bulge_arc_length(x1: float, y1: float, x2: float, y2: float, bulge: float) -> float:
@@ -357,10 +394,40 @@ def _connected_run_lengths(segs, tolerance: float):
     return list(totals.values())
 
 
+def _node_key(point, tolerance: float):
+    step = tolerance if tolerance > 0 else 1.0
+    return (round(point[0] / step), round(point[1] / step))
+
+
+def _endpoint_degrees(segs, tolerance: float) -> dict:
+    """Số đầu đoạn gặp nhau tại mỗi nút — bậc của nút trong đồ thị tuyến ống.
+
+    Bậc là thứ phân biệt CO với TÊ, và trước đây không ai tính nó: bậc 2 là tuyến đi qua
+    (đổi hướng thì lắp co), bậc ≥ 3 là chỗ rẽ nhánh (lắp tê).
+    """
+    counts: dict = {}
+    for seg in segs:
+        for point in (seg["start"], seg["end"]):
+            key = _node_key(point, tolerance)
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _process_fittings_for_layer(args):
     layer, segs, tolerance, stock_length = args
     elbows = sum(1 for s in segs if s["is_arc"])
     tees = 0
+
+    # Ngã ba/ngã tư nơi CẢ BA đầu đoạn cùng chạm nhau tại một điểm.
+    #
+    # Cách nhận tê cũ chỉ bắt trường hợp đầu mút nhánh chạm vào THÂN tuyến chính. Nhưng
+    # tuyến chính thường bị tách ngay tại chỗ rẽ — polyline có một vertex ở đó, hoặc họa
+    # viên vẽ từng đoạn một — và khi đó điểm rẽ là ĐẦU MÚT của cả ba đoạn, không nằm trong
+    # thân đoạn nào cả. Kết quả: tê không được đếm, mà khúc gãy 90° tại đúng chỗ đó lại
+    # bị tính thành một CO. Bảng vật tư ra sai hai lần: thừa một co, thiếu một tê.
+    degrees = _endpoint_degrees(segs, tolerance)
+    junctions = {key for key, deg in degrees.items() if deg >= 3}
+    tees += len(junctions)
 
     try:
         from rtree import index
@@ -385,12 +452,14 @@ def _process_fittings_for_layer(args):
                 b = segs[j]
                 if b["is_arc"] or b.get("flattened") or not _same_point(a["end"], b["start"], tolerance):
                     continue
+                if _node_key(a["end"], tolerance) in junctions:
+                    continue  # chỗ rẽ nhánh: đã tính là tê, không phải co
                 turn = abs(math.degrees(_angle(b["start"], b["end"]) - _angle(a["start"], a["end"])))
                 turn = min(turn % 360, 360 - (turn % 360))
                 if turn >= ELBOW_MIN_ANGLE_DEG:
                     elbows += 1
 
-        # Tê: đầu mút tuyến này chạm thân tuyến kia.
+        # Tê: đầu mút tuyến này chạm thân tuyến kia (tuyến chính KHÔNG bị tách tại chỗ rẽ).
         for i, a in enumerate(segs):
             px, py, _ = a["start"]
             for j in idx.intersection((px - tolerance, py - tolerance, px + tolerance, py + tolerance)):
@@ -415,6 +484,8 @@ def _process_fittings_for_layer(args):
             for b in segs[i + 1:]:
                 if b["is_arc"] or b.get("flattened") or not _same_point(a["end"], b["start"], tolerance):
                     continue
+                if _node_key(a["end"], tolerance) in junctions:
+                    continue  # chỗ rẽ nhánh: đã tính là tê, không phải co
                 turn = abs(math.degrees(_angle(b["start"], b["end"]) - _angle(a["start"], a["end"])))
                 turn = min(turn % 360, 360 - (turn % 360))
                 if turn >= ELBOW_MIN_ANGLE_DEG:
@@ -529,14 +600,17 @@ def insert_repeat_count(entity) -> int:
 # Khoảng cách tối đa giữa hai nét của cùng một tuyến vẽ kiểu 2 nét song song (đơn vị bản
 # vẽ, theo mm). 2000 mm phủ hết cỡ ống gió/ống nước thường gặp; xa hơn nữa thì hai nét
 # nhiều khả năng là hai tuyến riêng biệt chứ không phải hai mép của một tuyến.
-DEFAULT_DOUBLE_LINE_MAX_WIDTH = 2000.0
+DEFAULT_DOUBLE_LINE_MAX_WIDTH = _tuned(
+    "double_line_max_width_mm", "DOUBLE_LINE_MAX_WIDTH_MM", 2000.0)
 
 # Hai đoạn phải chồng nhau ít nhất bằng tỷ lệ này (trên đoạn ngắn hơn) mới coi là hai mép
 # của cùng một tuyến, tránh bắt nhầm hai tuyến chỉ tình cờ chạm nhau một khúc ngắn.
 _DOUBLE_LINE_MIN_OVERLAP_RATIO = 0.6
 
-# Sai lệch góc tối đa (độ) để coi hai đoạn là song song.
-_PARALLEL_ANGLE_TOLERANCE_DEG = 2.0
+# Sai lệch góc tối đa (độ) để coi hai đoạn là song song. Nới rộng thì bắt được cả bản vẽ
+# tay cẩu thả nhưng dễ báo nhầm hai tuyến riêng biệt; thu hẹp thì ngược lại.
+_PARALLEL_ANGLE_TOLERANCE_DEG = _tuned(
+    "parallel_angle_tolerance_deg", "PARALLEL_ANGLE_TOLERANCE_DEG", 2.0)
 
 
 def detect_double_line_runs(segments, max_width: float = DEFAULT_DOUBLE_LINE_MAX_WIDTH,
@@ -552,10 +626,26 @@ def detect_double_line_runs(segments, max_width: float = DEFAULT_DOUBLE_LINE_MAX
     phân biệt được hai trường hợp này, nên quyết định cuối cùng phải thuộc về kỹ sư; sai
     lầm ở đây mà tự trừ thì lại thành bóc THIẾU đúng một nửa.
 
-    Trả về `{layer: chiều dài nghi tính đôi}`. Thuật toán gom đoạn theo (layer, hướng) rồi
-    chỉ so các đoạn có khoảng lệch vuông góc đủ nhỏ, nên không phải so từng cặp toàn bản vẽ.
+    Trả về `{layer: chiều dài nghi tính đôi}`. Thuật toán gom đoạn theo layer, sắp theo
+    khoảng lệch vuông góc rồi chỉ so trong cửa sổ `max_width`, nên không phải so từng cặp
+    toàn bản vẽ.
+
+    **Hai cái bẫy hình học đã sửa** (bản đầu gom đoạn theo "ô góc" `round(angle/2°)`):
+
+    1. *Lệch góc nhỏ rơi vào hai ô khác nhau.* Hai nét vẽ tay lệch nhau 0,5° vẫn là hai
+       mép của một ống, nhưng nếu chúng nằm hai bên ranh giới ô (VD 1,9° và 2,1°) thì
+       không bao giờ được đem so với nhau. Nay so **hiệu góc thật**, không so số hiệu ô.
+    2. *Mốc 0/180.* Một nét ở 0,2° và nét kia ở 179,9° chỉ lệch nhau 0,3°, nhưng số hiệu
+       ô là 0 và 90 — xa nhau nhất có thể. Nay dùng hiệu góc **vòng tròn** (mod 180).
+       Kèm theo, hướng của mỗi đoạn được chuẩn hóa về nửa mặt phẳng chuẩn trước khi tính
+       `offset`: hai vector ngược chiều cho ra `offset` trái dấu, nên nếu không chuẩn hóa
+       thì ngay cả khi so đúng cặp, khoảng lệch vẫn tính sai.
+
+    Cả hai đều làm cảnh báo **im lặng không nổ** trên đúng loại bản vẽ hay gặp nhất (vẽ
+    tay, tuyến gần ngang), để lại một bảng khối lượng gấp đôi thực tế mà không có dấu hiệu
+    gì — đúng thứ `docs/DAC_TA_HE_THONG.md` mục 6 xếp là lỗi nghiêm trọng nhất.
     """
-    buckets = {}
+    by_layer: dict[str, list] = {}
     for seg in segments:
         (x1, y1, _), (x2, y2, _) = seg["start"], seg["end"]
         dx, dy = x2 - x1, y2 - y1
@@ -564,17 +654,20 @@ def detect_double_line_runs(segments, max_width: float = DEFAULT_DOUBLE_LINE_MAX
             continue
         # Góc không hướng (0..180): hai nét của một ống có thể được vẽ ngược chiều nhau.
         angle = math.degrees(math.atan2(dy, dx)) % 180.0
-        key = (seg["layer"], round(angle / _PARALLEL_ANGLE_TOLERANCE_DEG))
-        ux, uy = dx / length, dy / length
+        # Hướng CHUẨN HÓA suy từ góc đó, không lấy thẳng (dx, dy): hai nét vẽ ngược chiều
+        # nhau phải cho cùng một hệ quy chiếu thì `offset` mới so được với nhau.
+        rad = math.radians(angle)
+        ux, uy = math.cos(rad), math.sin(rad)
         # Pháp tuyến: khoảng lệch của hai đường song song chính là hiệu `offset`.
         offset = -uy * x1 + ux * y1
         t1, t2 = ux * x1 + uy * y1, ux * x2 + uy * y2
-        buckets.setdefault(key, []).append(
-            {"offset": offset, "lo": min(t1, t2), "hi": max(t1, t2), "length": length}
+        by_layer.setdefault(seg["layer"], []).append(
+            {"angle": angle, "offset": offset, "lo": min(t1, t2), "hi": max(t1, t2),
+             "length": length}
         )
 
     doubled = {}
-    for (layer, _), items in buckets.items():
+    for layer, items in by_layer.items():
         items.sort(key=lambda it: it["offset"])
         used = [False] * len(items)
         for i, first in enumerate(items):
@@ -589,6 +682,8 @@ def detect_double_line_runs(segments, max_width: float = DEFAULT_DOUBLE_LINE_MAX
                     break  # đã sắp xếp theo offset nên các đoạn sau còn xa hơn
                 if gap < min_separation:
                     continue  # trùng khít nhau là hình học overkill, đã có cảnh báo riêng
+                if _angle_gap(first["angle"], second["angle"]) > _PARALLEL_ANGLE_TOLERANCE_DEG:
+                    continue
                 overlap = min(first["hi"], second["hi"]) - max(first["lo"], second["lo"])
                 if overlap <= 0:
                     continue
@@ -599,6 +694,16 @@ def detect_double_line_runs(segments, max_width: float = DEFAULT_DOUBLE_LINE_MAX
                 break
 
     return doubled
+
+
+def _angle_gap(a1: float, a2: float) -> float:
+    """Hiệu hai góc không hướng (0..180), tính vòng tròn.
+
+    0,2° và 179,9° chỉ lệch nhau 0,3°, không phải 179,7° — bỏ qua điều này là bỏ sót toàn
+    bộ các tuyến gần ngang, loại phổ biến nhất trong bản vẽ MEPF.
+    """
+    diff = abs(a1 - a2) % 180.0
+    return min(diff, 180.0 - diff)
 
 
 def effective_block_name(entity, doc) -> tuple:

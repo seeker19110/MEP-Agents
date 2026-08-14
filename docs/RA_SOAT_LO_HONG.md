@@ -19,6 +19,11 @@ Mục nào chưa chạy được thì ghi rõ là chưa chạy.
 | 8 | Redis trong Compose không mật khẩu, cổng mở ra host | 🟡 Vừa | ✅ Đã trả (chưa chạy thử được) |
 | 9 | Không giới hạn tần suất, không giới hạn dung lượng upload | 🟡 Vừa | ✅ Đã trả |
 | 10 | Bộ test cũ không hề kiểm tra xác thực qua request thật | 🟠 Cao | ✅ Đã sửa (17 test mới) |
+| 11 | WebSocket vẫn tự polling ở phía server | 🟡 Vừa | ✅ Đã trả |
+| 12 | **Cảnh báo "tính đôi" im lặng không nổ** trên bản vẽ vẽ tay | 🔴 Nghiêm trọng | ✅ Đã sửa |
+| 13 | **Ngã ba ống đếm nhầm thành co thay vì tê** | 🟠 Cao | ✅ Đã sửa |
+| 14 | Chỉ có MỘT tài khoản, không phân quyền, không thu hồi được token | 🟠 Cao | ✅ Đã trả |
+| 15 | Worker ghi chung thư mục cho mọi người dùng | 🟠 Cao | ✅ Đã trả |
 
 ---
 
@@ -324,13 +329,140 @@ response, chưa nhận cập nhật real-time. Cần sửa phía plugin C#, khô
 
 ---
 
+## 12. 🔴 Cảnh báo "tuyến vẽ 2 nét bị tính đôi" im lặng không nổ ✅ Đã sửa
+
+**Đây là lỗ hổng nghiệp vụ nặng nhất tìm được trong cả ba đợt rà soát**, vì hậu quả của nó
+là một con số đi thẳng vào hồ sơ thầu.
+
+Ống gió và ống nước cỡ lớn hầu như luôn được vẽ bằng HAI nét song song (hai mép ống). Cộng
+dồn chiều dài hình học ra **gấp đôi** tuyến thật, nên `detect_double_line_runs` là thứ duy
+nhất cho kỹ sư biết con số cần xem lại. Nó gom đoạn vào "ô góc" `round(angle / 2°)` rồi chỉ
+so các đoạn trong cùng một ô — và cách gom đó hỏng ở đúng hai chỗ hay gặp nhất:
+
+1. **Lệch góc nhỏ rơi vào hai ô khác nhau.** Hai nét vẽ tay lệch 0,5° vẫn là hai mép của
+   một ống, nhưng nằm hai bên ranh giới ô (VD 1,9° và 2,1°) thì không bao giờ được đem so.
+2. **Mốc 0/180.** Một nét ở 0,2° và nét kia ở 179,9° chỉ lệch nhau 0,3°, nhưng số hiệu ô là
+   0 và 90 — xa nhau nhất có thể. Đây là loại tuyến phổ biến nhất trong bản vẽ MEPF.
+
+Kiểm chứng trước khi sửa (hai đoạn song song cách nhau 300 mm, đủ điều kiện mọi mặt khác):
+
+```
+0,0° vs 0,0°    -> phát hiện: True
+0,0° vs 1,2°    -> phát hiện: False   ← lệch 1,2°, vẫn là một ống
+1,0° vs 1,5°    -> phát hiện: False   ← lệch 0,5°
+0,2° vs 179,9°  -> phát hiện: False   ← lệch thật 0,3°
+```
+
+**Hệ quả:** bảng khối lượng gấp đôi thực tế, không một dòng cảnh báo — đúng thứ
+`docs/DAC_TA_HE_THONG.md` mục 6 xếp là lỗi nghiêm trọng nhất của dự án.
+
+**Cách xử lý phần "không kiểm chứng được".** Hai sửa đổi hình học (mục này và mục 13) làm
+**đổi con số đi vào hồ sơ thầu**, mà môi trường viết code không có bản vẽ MEPF thật để đối
+chiếu. Không chờ được, nhưng cũng không được lặng lẽ áp. Ba việc làm cho rủi ro đó xử lý
+được:
+
+1. **Cảnh báo hiện rõ trong kết quả**, đã có sẵn: `auto_quantity_takeoff` in
+   `[CẢNH BÁO NGHIÊM TRỌNG] Phát hiện ~X m tuyến có thể đang được tính đôi...` kèm tên
+   layer. Kỹ sư thấy ngay chỗ cần xem lại thay vì phải tin con số.
+2. **Bốn ngưỡng chỉnh được bằng cấu hình** (`PARALLEL_ANGLE_TOLERANCE_DEG`,
+   `DOUBLE_LINE_MAX_WIDTH_MM`, `ELBOW_MIN_ANGLE_DEG`, `PIPE_STOCK_LENGTH_MM`) — mỗi văn
+   phòng vẽ một kiểu, và ngưỡng là thứ quyết định cảnh báo nổ hay không.
+3. **Công cụ đối chiếu** `scripts/kiem_chung_hinh_hoc.py`: chạy trên bộ bản vẽ thật, in ra
+   bảng co/tê/măng sông và cảnh báo tính đôi cho từng bản vẽ để so với hồ sơ đã bóc tay.
+   Cờ `--do-nhay` chạy lại với nhiều ngưỡng — con số ổn định qua nhiều ngưỡng là con số
+   đáng tin, con số nhảy mạnh nghĩa là bản vẽ nằm ngay ranh giới quy ước và chỗ đó phải do
+   kỹ sư quyết. Script **chỉ đọc**, không sửa bản vẽ.
+
+Việc còn lại là của người có bản vẽ: chạy script trên vài hồ sơ **đã được duyệt**, so từng
+dòng. Đó là bước duy nhất biến "logic đúng trên dữ liệu dựng tay" thành "đúng với hồ sơ
+của chúng ta".
+
+**Đã sửa:** so **hiệu góc thật** theo vòng tròn (mod 180) thay vì so số hiệu ô, và chuẩn
+hóa hướng mỗi đoạn về nửa mặt phẳng chuẩn trước khi tính khoảng lệch — hai vector ngược
+chiều cho `offset` trái dấu, nên không chuẩn hóa thì ngay cả khi so đúng cặp, khoảng lệch
+vẫn tính sai. 21 test trong `tests/test_double_line_detection.py`, gồm cả các ca **không
+được bắt nhầm** (lệch 5°, 10°, 90°; khác layer; chồng nhau quá ít).
+
+---
+
+## 13. 🟠 Ngã ba ống đếm nhầm thành co thay vì tê ✅ Đã sửa
+
+`detect_fittings` nhận tê bằng cách tìm đầu mút của một tuyến chạm vào **thân** tuyến khác.
+Cách đó bỏ sót đúng kiểu vẽ phổ biến nhất: tuyến chính thường **bị tách ngay tại chỗ rẽ**
+— polyline có một vertex ở đó, hoặc họa viên vẽ từng đoạn một. Khi đó điểm rẽ là đầu mút
+của cả ba đoạn, không nằm trong thân đoạn nào.
+
+Kiểm chứng trước khi sửa, tuyến chữ T tách tại chỗ rẽ:
+
+```
+{'co': 1, 'te': 0, 'mang_song': 1}     ← phải là co 0, tê 1
+```
+
+Sai **hai lần** trong cùng một chỗ: thừa một co (khúc gãy 90° tại điểm rẽ bị tính thành
+co), thiếu một tê. Bảng vật tư đặt mua sai chủng loại phụ kiện.
+
+**Đã sửa:** đếm theo **bậc của nút** trong đồ thị tuyến — bậc ≥ 3 là chỗ rẽ nhánh (tê),
+và co không được tính tại các nút đó nữa. Cách nhận tê cũ (nhánh chạm thân tuyến) vẫn giữ
+vì nó bắt trường hợp bổ sung: tuyến chính KHÔNG bị tách.
+
+**Thay đổi hành vi cần biết:** bảng phụ kiện của bản vẽ có ngã ba sẽ đổi — **giảm** số co
+và **tăng** số tê. Đó là con số đúng.
+
+---
+
+## 14. 🟠 Chỉ có MỘT tài khoản, không phân quyền, không thu hồi được token ✅ Đã trả
+
+JWT trước đây xác thực đúng một tài khoản bootstrap đọc từ biến môi trường. Không tạo được
+người thứ hai, mọi người đều là admin, và **không có cách nào thu hồi một token đã phát** —
+đổi mật khẩu vì nghi bị lộ cũng không đuổi được phiên của kẻ kia.
+
+**Đã trả:** `src/users.py` — CSDL SQLite (thư viện chuẩn, không thêm phụ thuộc), mật khẩu
+băm PBKDF2-HMAC-SHA256 600k vòng có muối riêng, ba vai trò `viewer`/`engineer`/`admin`,
+router `/api/v1/admin/users`, và tự đổi mật khẩu qua `/api/v1/auth/change-password`.
+
+**Thu hồi bằng `token_version`, không phải danh sách đen.** Mỗi người có một số phiên bản;
+JWT mang theo `ver`; thu hồi = tăng số đó, mọi token cũ lập tức vô hiệu. Danh sách đen thì
+phải lưu từng token, dọn rác theo hạn, và vẫn sót nếu bỏ lỡ một cái. Đổi mật khẩu, đổi vai
+trò và khóa tài khoản đều tự thu hồi — hạ quyền mà không thu hồi thì token cũ vẫn mang vai
+trò cũ.
+
+**Hai cái bẫy tự tạo, phát hiện khi viết test:**
+
+- *Endpoint quản trị không hề xác thực.* Bản đầu chỉ gắn kiểm vai trò, mà hàm lấy vai trò
+  lại trả "admin" cho request không có token — nên khách nặc danh liệt kê được cả danh sách
+  tài khoản. Kiểm vai trò không thay được kiểm danh tính; phải có cả hai.
+- *Tạo một `viewer` là khóa cứng hệ thống.* Điều kiện tắt tài khoản bootstrap ban đầu là
+  "CSDL đã có người dùng", nên tạo người đầu tiên không phải admin là mất luôn đường vào
+  quyền quản trị. Điều kiện đúng là "**đã có admin**" — bám theo đúng mục đích của tài
+  khoản bootstrap. Kèm chốt chặn không cho xóa/hạ quyền/khóa admin cuối cùng.
+
+---
+
+## 15. 🟠 Worker ghi chung thư mục cho mọi người dùng ✅ Đã trả
+
+`parse_cad_to_db_task` nhận `user_id` rồi **không dùng vào việc gì**: mọi người ghi chung
+`uploads/` và `data/boq/`. Bản vẽ của khách này nằm cạnh khách kia, và hai người tải lên
+hai file trùng tên (`ban_ve.dxf` — rất dễ trùng) là **ghi đè nhau trong im lặng**.
+
+**Đã trả:** mỗi người một workspace riêng `data/workspaces/<tên>-<băm>/`, đặt bằng
+`set_workspace_dir` nên mọi tool file tự động bị `resolve_safe_path` giữ trong đó. Bản vẽ
+được đưa vào workspace trước khi xử lý — bắt buộc, vì file nằm ngoài workspace sẽ bị chính
+`resolve_safe_path` từ chối.
+
+Tên thư mục có **băm 8 ký tự** ở cuối: danh tính đến từ `sub` của JWT nên phải coi là dữ
+liệu không tin cậy, và nếu chỉ lọc ký tự thì `a/b` và `a_b` rơi vào cùng một thư mục — hai
+người dùng chung workspace mà không ai biết.
+
+---
+
 ## Tổng kết đợt rà soát
 
 | Chỉ số | Trước | Sau |
 |---|---:|---:|
-| Test | 600 | **654** |
-| Module `src/` | 59 | 61 (xóa 4 module patch, thêm 6 module chức năng) |
-| Lỗ hổng bảo mật đã bịt | — | 5 (mục 1, 3, 4, 6, 8) + pickle trong `load_unit_prices` |
+| Test | 600 | **718** |
+| Module `src/` | 59 | 62 (xóa 4 module patch, thêm 7 module chức năng) |
+| Lỗ hổng bảo mật đã bịt | — | 7 (mục 1, 3, 4, 6, 8, 14) + pickle trong `load_unit_prices` |
+| **Lỗi bóc khối lượng sai** | — | **2 (mục 12, 13)** — loại nguy hiểm nhất về nghiệp vụ |
 | Sai phạm vi quyền đã sửa | — | 1 (mục 5) |
 | Module patch còn lại | 5 | **0** |
 | Vấn đề ghi nhận, chưa làm | — | 0 mục sửa được bằng code |
@@ -344,9 +476,7 @@ không viết code đoán trước — cùng lý do đã ghi ở đầu `TECH_DE
 | Việc | Cần gì để làm | Vì sao không đoán trước được |
 |---|---|---|
 | Chạy thật `docker compose up --build` | Máy có Docker daemon | Rất có thể lộ lỗi runtime chưa lường: quyền thư mục volume, thiếu biến bắt buộc, healthcheck sai lệnh. Chỉ chạy thật mới biết |
-| CSDL người dùng + phân quyền + thu hồi token | Duyệt thiết kế schema | Tự bịa schema chưa ai duyệt rồi migrate là rủi ro cao hơn để trống |
-| Postgres/pgvector/S3 thật | Instance thật để migrate và chạy thử | Như trên |
-| Workspace riêng từng người trong Worker | Đi cùng CSDL người dùng | Không tách được khỏi việc trên |
+| Postgres/pgvector/S3 thật | Instance thật để migrate và chạy thử | Tự bịa schema chưa ai duyệt rồi migrate là rủi ro cao hơn để trống. CSDL người dùng hiện chạy SQLite (mục 14), chuyển sang Postgres khi có instance thật |
 | Local LLM air-gapped | GPU 16–24 GB VRAM | Mua/thuê phần cứng, không phải sửa code |
 | YOLO nhận diện ký hiệu bản vẽ rác | Dữ liệu gán nhãn thật | Model huấn luyện trên dữ liệu bịa còn tệ hơn không có model |
 | Kiểm thử thật với Revit/AutoCAD | Máy cài Revit/AutoCAD | Không giả lập được |

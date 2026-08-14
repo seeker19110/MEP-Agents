@@ -23,3 +23,7 @@ outputs/
 data/checkpoints.sqlite*
 .redis/
 uploads/
+
+# CSDL người dùng sinh ra lúc chạy — không bao giờ commit (chứa hash mật khẩu thật)
+data/users.sqlite
+data/workspaces/

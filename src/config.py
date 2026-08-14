@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     max_tool_result_chars: int = 6000
     cad_cache_max: int = 8
 
+    # Ngưỡng hình học bóc khối lượng. Bốn con số này quyết định con số đi vào hồ sơ
+    # thầu — xem `src/cad_geometry.py::_tuned` và `scripts/kiem_chung_hinh_hoc.py`.
+    parallel_angle_tolerance_deg: float = 2.0
+    double_line_max_width_mm: float = 2000.0
+    elbow_min_angle_deg: float = 15.0
+    pipe_stock_length_mm: float = 6000.0
+
     embedding_backend: str = ""
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_embed_model: str = "nomic-embed-text"

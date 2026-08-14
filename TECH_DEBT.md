@@ -18,7 +18,8 @@ Trạng thái tổng thể và số liệu hiện hành nằm ở [`docs/TIEN_DO
 | 11 | Bảng đơn giá cũ mà không ai cảnh báo | 🟠 Cao | ✅ Đã trả — xem mục 11 |
 | 12 | Vòng lặp import giữa `tools.py` và `qs_tools.py` | 🟢 Thấp | ✅ Đã trả — xem mục 12 |
 | 2 | Local LLM / Air-gapped (cần GPU lớn) | 🟢 Thấp | Chưa làm — cần phần cứng thật |
-| 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | Còn CSDL người dùng + phân quyền; quyền sở hữu tài nguyên đã xong (mục 14) |
+| 6 | Billing / đăng nhập | 🟢 Thấp (tùy mô hình kinh doanh) | ✅ Phần đăng nhập đã xong (CSDL người dùng, 3 vai trò, thu hồi token); billing vẫn cần cổng thanh toán thật |
+| 17 | Bóc khối lượng: cảnh báo tính đôi im lặng + ngã ba đếm nhầm thành co | 🔴 Khẩn cấp | ✅ Đã trả — xem [`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md) mục 12–13 |
 | 10 | Rủi ro của kiến trúc "patch lúc import" | 🟠 Cao | ✅ Đã trả — **xóa hết module patch**; xem mục 10 |
 | 13 | Xác thực JWT chưa từng có hiệu lực (API mở toang ở chế độ JWT) | 🔴 Khẩn cấp | ✅ Đã trả — xem [`docs/RA_SOAT_LO_HONG.md`](docs/RA_SOAT_LO_HONG.md) mục 1 |
 | 14 | Chưa có quyền sở hữu tài nguyên (ai cũng tải được BOQ của người khác) | 🟠 Cao | ✅ Đã trả — `src/task_owner.py` |
